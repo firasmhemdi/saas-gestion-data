@@ -102,22 +102,52 @@ def classify_document(text: str, filename: str = "") -> DocumentType:
 
 def extract_document_fields(text: str) -> tuple[dict[str, Any], int]:
     normalized = " ".join(text.split())
+    searchable = _normalize_for_search(normalized)
     fields: dict[str, Any] = {}
 
-    date_match = re.search(r"(\d{4}-\d{2}-\d{2}|\d{2}[/-]\d{2}[/-]\d{4})", normalized)
-    if date_match:
-        parsed = _parse_date(date_match.group(1))
+    dates = re.findall(r"(\d{4}-\d{2}-\d{2}|\d{2}[/-]\d{2}[/-]\d{4})", normalized)
+    if dates:
+        parsed = _parse_date(dates[0])
         if parsed:
             fields["document_date"] = parsed.isoformat()
+    parsed_dates = [parsed for raw in dates if (parsed := _parse_date(raw))]
+    for index, first_period in enumerate(parsed_dates):
+        second_period = next((candidate for candidate in parsed_dates[index + 1 :] if first_period < candidate), None)
+        if second_period:
+            fields["period_start"] = first_period.isoformat()
+            fields["period_end"] = second_period.isoformat()
+            break
 
-    amount_match = re.search(r"(?:montant|total|ttc)\s*[:=]?\s*([0-9]+(?:[,.][0-9]+)?)", normalized, re.IGNORECASE)
-    if amount_match:
-        fields["amount"] = _parse_float(amount_match.group(1))
+    if "steg" in searchable or "societe tunisienne" in searchable or "electricite et du gaz" in searchable:
+        fields["provider"] = "STEG"
+
+    amount_due = _extract_amount_due(normalized)
+    if amount_due is not None:
+        fields["amount_due"] = amount_due
+
+    amount = _extract_total_amount(normalized)
+    if amount is not None:
+        fields["amount"] = amount
 
     quantity_match = re.search(r"([0-9]+(?:[,.][0-9]+)?)\s*(kwh|m3|m³|t|tonnes?|litres?|l)\b", normalized, re.IGNORECASE)
     if quantity_match:
         fields["quantity"] = _parse_float(quantity_match.group(1))
         fields["unit"] = quantity_match.group(2)
+    elif any(keyword in searchable for keyword in ("electricite", "eclairage", "kwh")):
+        electricity_quantity = _extract_after_keywords(normalized, ("electricite", "électricité", "eclairage", "éclairage"), window=140)
+        if electricity_quantity is not None:
+            fields["quantity"] = electricity_quantity
+            fields["unit"] = "kWh"
+
+    gas_match = re.search(r"([0-9]+(?:[,.][0-9]+)?)\s*(m3|m³)\b", normalized, re.IGNORECASE)
+    if gas_match:
+        fields["gas_quantity"] = _parse_float(gas_match.group(1))
+        fields["gas_unit"] = gas_match.group(2)
+    elif "gaz" in searchable:
+        gas_quantity = _extract_after_keywords(normalized, ("gaz",), window=140)
+        if gas_quantity is not None and gas_quantity != fields.get("quantity"):
+            fields["gas_quantity"] = gas_quantity
+            fields["gas_unit"] = "m3"
 
     supplier_match = re.search(r"(?:fournisseur|supplier)\s*[:=]\s*([A-Za-z0-9 &.'-]{2,80})", normalized, re.IGNORECASE)
     if supplier_match:
@@ -146,6 +176,55 @@ def _parse_float(value: Any) -> float | None:
         return float(str(value).strip().replace(",", "."))
     except ValueError:
         return None
+
+
+def _normalize_for_search(value: str) -> str:
+    replacements = str.maketrans({"é": "e", "è": "e", "ê": "e", "à": "a", "â": "a", "ù": "u", "ç": "c", "ï": "i", "î": "i"})
+    return value.lower().translate(replacements)
+
+
+def _extract_total_amount(text: str) -> float | None:
+    patterns = (
+        r"(?:montant\s+total|total\s+ttc|total\s+consommation\s*&\s*services)\D{0,40}([0-9]+(?:[,.][0-9]+)?)",
+        r"(?:montant|total|ttc)\s*[:=]?\s*([0-9]+(?:[,.][0-9]+)?)",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            parsed = _parse_float(match.group(1))
+            if parsed is not None:
+                return parsed
+    return None
+
+
+def _extract_amount_due(text: str) -> float | None:
+    patterns = (
+        r"(?:montant\s+(?:a|à)\s+payer)\D{0,40}([0-9]+(?:[,.][0-9]+)?)",
+        r"([0-9]+(?:[,.][0-9]+)?)\D{0,20}(?:montant\s+(?:a|à)\s+payer)",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            parsed = _parse_float(match.group(1))
+            if parsed is not None:
+                return parsed
+    return None
+
+
+def _extract_after_keywords(text: str, keywords: tuple[str, ...], window: int = 120) -> float | None:
+    normalized = _normalize_for_search(text)
+    normalized_keywords = tuple(_normalize_for_search(keyword) for keyword in keywords)
+    for keyword in normalized_keywords:
+        index = normalized.find(keyword)
+        if index == -1:
+            continue
+        snippet = text[index : index + window]
+        numbers = re.findall(r"\b([0-9]+(?:[,.][0-9]+)?)\b", snippet)
+        for raw in numbers:
+            parsed = _parse_float(raw)
+            if parsed is not None and parsed > 0:
+                return parsed
+    return None
 
 
 def _parse_date(value: Any) -> date | None:

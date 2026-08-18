@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Image from "next/image";
 
 import { Navbar } from "@/components/auth/navbar";
 import { api, ApiError } from "@/lib/api";
@@ -14,6 +15,21 @@ const documentTypeLabels: Record<string, string> = {
   autre: "Autre",
 };
 
+const fieldLabels: Record<string, string> = {
+  provider: "Fournisseur",
+  document_date: "Date document",
+  period_start: "Début période",
+  period_end: "Fin période",
+  amount: "Montant total",
+  amount_due: "Montant à payer",
+  quantity: "Quantité",
+  unit: "Unité",
+  gas_quantity: "Quantité gaz",
+  gas_unit: "Unité gaz",
+};
+
+const editableFields = ["provider", "document_date", "period_start", "period_end", "amount", "amount_due", "quantity", "unit", "gas_quantity", "gas_unit"];
+
 export default function DocumentsPage() {
   const [documents, setDocuments] = useState<DocumentRecord[]>([]);
   const [sites, setSites] = useState<Site[]>([]);
@@ -22,12 +38,21 @@ export default function DocumentsPage() {
   const [siteId, setSiteId] = useState("");
   const [indicatorId, setIndicatorId] = useState("");
   const [rawText, setRawText] = useState("Facture énergie\nFournisseur: STEG\nDate: 2026-02-15\nTotal: 450.25\nConsommation: 1240 kWh");
+  const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
   const [selected, setSelected] = useState<DocumentRecord | null>(null);
   const [fields, setFields] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [ocrBusy, setOcrBusy] = useState(false);
+  const [ocrProgress, setOcrProgress] = useState(0);
+
+  const selectDocument = useCallback((document: DocumentRecord) => {
+    setSelected(document);
+    const current = document.extracted_data?.fields ?? {};
+    setFields(Object.fromEntries(editableFields.map((key) => [key, String(current[key] ?? "")])));
+  }, []);
 
   const load = useCallback(async () => {
     setError(null);
@@ -44,23 +69,11 @@ export default function DocumentsPage() {
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Impossible de charger les documents.");
     }
-  }, [selected]);
+  }, [selected, selectDocument]);
 
   useEffect(() => {
     load();
   }, [load]);
-
-  function selectDocument(document: DocumentRecord) {
-    setSelected(document);
-    const current = document.extracted_data?.fields ?? {};
-    setFields({
-      provider: String(current.provider ?? ""),
-      document_date: String(current.document_date ?? ""),
-      amount: String(current.amount ?? ""),
-      quantity: String(current.quantity ?? ""),
-      unit: String(current.unit ?? ""),
-    });
-  }
 
   async function readFile(file: File) {
     setFilename(file.name);
@@ -69,12 +82,16 @@ export default function DocumentsPage() {
     if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
 
     if (file.type.startsWith("image/")) {
+      setImageFile(file);
       setImagePreviewUrl(URL.createObjectURL(file));
       setRawText("");
-      setMessage("Photo importée. Renseignez le texte OCR ou les valeurs visibles avant l'analyse.");
+      setOcrProgress(0);
+      setMessage("Photo importée. Lancez l'extraction automatique, puis vérifiez les champs.");
       return;
     }
 
+    setImageFile(null);
+    setOcrProgress(0);
     setImagePreviewUrl(null);
     if (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) {
       setRawText("");
@@ -83,6 +100,39 @@ export default function DocumentsPage() {
     }
 
     setRawText(await file.text());
+  }
+
+  async function extractTextFromImage() {
+    if (!imageFile) return;
+    setOcrBusy(true);
+    setOcrProgress(0);
+    setError(null);
+    setMessage("Extraction OCR en cours...");
+    let worker: Awaited<ReturnType<(typeof import("tesseract.js"))["createWorker"]>> | null = null;
+    try {
+      const { createWorker } = await import("tesseract.js");
+      const activeWorker = await createWorker("fra+eng", 1, {
+        logger: (event: { status?: string; progress?: number }) => {
+          if (event.status === "recognizing text" && typeof event.progress === "number") {
+            setOcrProgress(Math.round(event.progress * 100));
+          }
+        },
+      });
+      worker = activeWorker;
+      const result = await activeWorker.recognize(imageFile);
+      const extractedText = (result.data.text ?? "").trim();
+      if (!extractedText) {
+        setError("OCR terminé, mais aucun texte exploitable n'a été détecté. Essayez une photo plus nette ou complétez les champs visibles.");
+        return;
+      }
+      setRawText(extractedText);
+      setMessage("Texte extrait automatiquement. Vous pouvez maintenant analyser le document.");
+    } catch {
+      setError("Impossible d'extraire automatiquement le texte. Vérifiez la connexion ou complétez les valeurs visibles manuellement.");
+    } finally {
+      if (worker) await worker.terminate();
+      setOcrBusy(false);
+    }
   }
 
   async function uploadDocument(event: React.FormEvent) {
@@ -163,15 +213,30 @@ export default function DocumentsPage() {
               </label>
             </div>
             {imagePreviewUrl ? (
-              <div className="mt-4 overflow-hidden rounded-lg border border-slate-200 bg-slate-50">
-                <img src={imagePreviewUrl} alt={filename} className="max-h-72 w-full object-contain" />
+              <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                <div className="relative h-72 w-full">
+                  <Image src={imagePreviewUrl} alt={filename} fill unoptimized className="rounded-md object-contain" />
+                </div>
+                <div className="mt-3 flex flex-wrap items-center gap-3">
+                  <button type="button" onClick={extractTextFromImage} disabled={ocrBusy || busy} className="rounded-lg bg-slate-950 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700 disabled:opacity-60">
+                    {ocrBusy ? "Extraction..." : "Extraire automatiquement"}
+                  </button>
+                  {ocrBusy ? (
+                    <div className="min-w-40 flex-1">
+                      <div className="h-2 overflow-hidden rounded-full bg-slate-200">
+                        <div className="h-full bg-emerald-600 transition-all" style={{ width: `${ocrProgress}%` }} />
+                      </div>
+                      <p className="mt-1 text-xs font-medium text-slate-500">{ocrProgress}%</p>
+                    </div>
+                  ) : null}
+                </div>
               </div>
             ) : null}
             <label className="mt-4 block text-sm font-medium text-slate-700">
               Texte OCR ou contenu extrait
               <textarea value={rawText} onChange={(e) => setRawText(e.target.value)} rows={9} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
             </label>
-            <button disabled={busy || !rawText} className="mt-4 rounded-lg bg-slate-950 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700 disabled:opacity-60">
+            <button disabled={busy || ocrBusy || !rawText} className="mt-4 rounded-lg bg-slate-950 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700 disabled:opacity-60">
               Analyser le document
             </button>
           </form>
@@ -185,9 +250,9 @@ export default function DocumentsPage() {
               <>
                 <p className="mt-2 text-sm text-slate-500">{selected.filename} · confiance {selected.extracted_data?.confidence ?? 0}% · {selected.status}</p>
                 <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                  {["provider", "document_date", "amount", "quantity", "unit"].map((key) => (
+                  {editableFields.map((key) => (
                     <label key={key} className="text-sm font-medium text-slate-700">
-                      {key}
+                      {fieldLabels[key] ?? key}
                       <input value={fields[key] ?? ""} onChange={(e) => setFields({ ...fields, [key]: e.target.value })} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
                     </label>
                   ))}

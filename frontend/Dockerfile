@@ -2,8 +2,8 @@ FROM node:20-alpine AS deps
 
 WORKDIR /app
 
-COPY package*.json ./
-RUN npm ci
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+RUN corepack enable && pnpm install --frozen-lockfile
 
 FROM node:20-alpine AS builder
 
@@ -14,7 +14,7 @@ ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-RUN npm run build
+RUN corepack enable && pnpm run build
 
 FROM node:20-alpine AS runner
 
@@ -30,4 +30,4 @@ COPY --from=builder /app/next.config.mjs ./next.config.mjs
 
 EXPOSE 3000
 
-CMD ["npm", "run", "start"]
+CMD ["sh", "-c", "corepack enable && pnpm run start"]
