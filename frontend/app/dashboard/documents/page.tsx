@@ -22,6 +22,7 @@ export default function DocumentsPage() {
   const [siteId, setSiteId] = useState("");
   const [indicatorId, setIndicatorId] = useState("");
   const [rawText, setRawText] = useState("Facture énergie\nFournisseur: STEG\nDate: 2026-02-15\nTotal: 450.25\nConsommation: 1240 kWh");
+  const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
   const [selected, setSelected] = useState<DocumentRecord | null>(null);
   const [fields, setFields] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
@@ -63,6 +64,24 @@ export default function DocumentsPage() {
 
   async function readFile(file: File) {
     setFilename(file.name);
+    setError(null);
+    setMessage(null);
+    if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
+
+    if (file.type.startsWith("image/")) {
+      setImagePreviewUrl(URL.createObjectURL(file));
+      setRawText("");
+      setMessage("Photo importée. Renseignez le texte OCR ou les valeurs visibles avant l'analyse.");
+      return;
+    }
+
+    setImagePreviewUrl(null);
+    if (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) {
+      setRawText("");
+      setError("Le PDF nécessite une étape OCR. Copiez le texte extrait ou saisissez les valeurs visibles.");
+      return;
+    }
+
     setRawText(await file.text());
   }
 
@@ -128,8 +147,8 @@ export default function DocumentsPage() {
             <h2 className="font-semibold text-slate-950">Dépôt et analyse</h2>
             <div className="mt-4 grid gap-4 sm:grid-cols-2">
               <label className="text-sm font-medium text-slate-700">
-                Fichier texte
-                <input type="file" accept=".txt,.csv,.pdf" onChange={(e) => e.target.files?.[0] && readFile(e.target.files[0])} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                Fichier
+                <input type="file" accept=".txt,.csv,.pdf,.jpg,.jpeg,.png,.webp" onChange={(e) => e.target.files?.[0] && readFile(e.target.files[0])} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
               </label>
               <label className="text-sm font-medium text-slate-700">
                 Nom
@@ -143,6 +162,11 @@ export default function DocumentsPage() {
                 </select>
               </label>
             </div>
+            {imagePreviewUrl ? (
+              <div className="mt-4 overflow-hidden rounded-lg border border-slate-200 bg-slate-50">
+                <img src={imagePreviewUrl} alt={filename} className="max-h-72 w-full object-contain" />
+              </div>
+            ) : null}
             <label className="mt-4 block text-sm font-medium text-slate-700">
               Texte OCR ou contenu extrait
               <textarea value={rawText} onChange={(e) => setRawText(e.target.value)} rows={9} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
