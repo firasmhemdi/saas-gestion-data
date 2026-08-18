@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     email_verification_required: bool = True
     demo_mode: bool = True
     otp_expose_demo_code: bool = False
+    email_provider: str = "smtp"
+    resend_api_key: str | None = None
+    resend_from_email: str | None = None
     smtp_host: str | None = None
     smtp_port: int = 587
     smtp_username: str | None = None

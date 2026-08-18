@@ -1,5 +1,8 @@
+import json
 import smtplib
 from email.message import EmailMessage
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 from app.core.config import get_settings
 from app.models.user import User
@@ -9,14 +12,50 @@ class EmailDeliveryError(Exception):
     pass
 
 
-def _send_code_email(user: User, *, subject: str, text: str, html: str) -> None:
+def _sender_header(name: str, email: str) -> str:
+    return f"{name} <{email}>"
+
+
+def _send_with_resend(user: User, *, subject: str, text: str, html: str) -> None:
+    settings = get_settings()
+    if not settings.resend_api_key:
+        raise EmailDeliveryError("Service e-mail API non configuré.")
+
+    from_email = settings.resend_from_email or settings.smtp_from_email
+    payload = {
+        "from": _sender_header(settings.smtp_from_name, from_email),
+        "to": [user.email],
+        "subject": subject,
+        "text": text,
+        "html": html,
+    }
+    request = Request(
+        "https://api.resend.com/emails",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {settings.resend_api_key}",
+            "Content-Type": "application/json",
+            "User-Agent": "saas-gestion-data/1.0",
+        },
+        method="POST",
+    )
+
+    try:
+        with urlopen(request, timeout=15) as response:
+            if response.status >= 400:
+                raise EmailDeliveryError("Impossible d'envoyer l'e-mail OTP.")
+    except (HTTPError, URLError) as exc:
+        raise EmailDeliveryError("Impossible d'envoyer l'e-mail OTP.") from exc
+
+
+def _send_with_smtp(user: User, *, subject: str, text: str, html: str) -> None:
     settings = get_settings()
     if not settings.smtp_host:
         raise EmailDeliveryError("Service e-mail OTP non configuré.")
 
     message = EmailMessage()
     message["Subject"] = subject
-    message["From"] = f"{settings.smtp_from_name} <{settings.smtp_from_email}>"
+    message["From"] = _sender_header(settings.smtp_from_name, settings.smtp_from_email)
     message["To"] = user.email
     message.set_content(text)
     message.add_alternative(html, subtype="html")
@@ -30,6 +69,14 @@ def _send_code_email(user: User, *, subject: str, text: str, html: str) -> None:
             smtp.send_message(message)
     except Exception as exc:
         raise EmailDeliveryError("Impossible d'envoyer l'e-mail OTP.") from exc
+
+
+def _send_code_email(user: User, *, subject: str, text: str, html: str) -> None:
+    settings = get_settings()
+    if settings.email_provider.lower() == "resend":
+        _send_with_resend(user, subject=subject, text=text, html=html)
+        return
+    _send_with_smtp(user, subject=subject, text=text, html=html)
 
 
 def send_otp_code(user: User, code: str, expires_minutes: int) -> None:

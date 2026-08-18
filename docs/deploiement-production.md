@@ -23,6 +23,8 @@ Variables importantes :
 - `DATA_ENCRYPTION_KEY` : secret long et aléatoire pour le chiffrement local.
 - `SMTP_PASSWORD` : mot de passe d'application Gmail.
 - `EMAIL_VERIFICATION_REQUIRED=true` : l'utilisateur doit confirmer son e-mail après inscription.
+- `EMAIL_PROVIDER=resend` : recommandé sur Render Free, car les ports SMTP sont bloqués sur les services gratuits.
+- `RESEND_API_KEY` : clé API Resend pour envoyer les codes par HTTPS.
 
 Générer un secret depuis PowerShell :
 
@@ -66,6 +68,7 @@ Vérifications après lancement :
 
 - Secrets forts générés.
 - Gmail App Password configuré.
+- Provider e-mail configuré (`resend` sur Render Free, ou `smtp` sur un plan qui autorise SMTP).
 - HTTPS activé.
 - Domaine frontend ajouté dans `CORS_ALLOWED_ORIGINS`.
 - `NEXT_PUBLIC_API_URL` pointe vers l'API réelle.
