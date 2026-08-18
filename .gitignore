@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+.venv/
+.env
+.env.*
+!.env.example
+!.env.production.example
+.pytest_cache/
+*.db
+*.log
+.DS_Store
+node_modules/
+.next/
+.git-backup/

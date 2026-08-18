@@ -1,0 +1,32 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: saas-db
+    environment:
+      POSTGRES_USER: saas
+      POSTGRES_PASSWORD: saas
+      POSTGRES_DB: saas_gestion_data
+    ports:
+      - "5433:5432"
+    volumes:
+      - saas_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U saas -d saas_gestion_data"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build: ./backend
+    container_name: saas-backend
+    environment:
+      DATABASE_URL: postgresql+psycopg://saas:saas@db:5432/saas_gestion_data
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-CHANGE_ME_production_secret_key_at_least_32_chars}
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  saas_pgdata:
