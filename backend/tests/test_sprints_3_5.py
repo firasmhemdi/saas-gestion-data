@@ -159,3 +159,24 @@ class TestSprints3To5:
         assert fields["quantity"] == 212
         assert fields["gas_quantity"] == 52
         assert fields["amount_due"] == 987
+
+    def test_steg_invoice_calculates_missing_quantities_from_unit_prices(self):
+        text = """
+        STEG Facture sur relevé 2025-12-01 2026-03-30
+        Electricité Eclairage Montant HT 37.312 Prix unitaire 0.176
+        Redevances fixes électricité 19.600 Prix unitaire 0.700
+        Gaz naturel Montant HT 12.012 Prix unitaire 0.231
+        Redevances fixes gaz 3.000 Prix unitaire 0.150
+        Montant total 85.352
+        987.000 Montant a payer
+        """
+
+        fields, confidence = extract_document_fields(text)
+
+        assert fields["quantity"] == 212
+        assert fields["unit"] == "kWh"
+        assert fields["gas_quantity"] == 52
+        assert fields["gas_unit"] == "m3"
+        assert fields["amount"] == 85.352
+        assert fields["amount_due"] == 987
+        assert confidence >= 85

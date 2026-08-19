@@ -137,6 +137,15 @@ def extract_document_fields(text: str) -> tuple[dict[str, Any], int]:
             fields["gas_quantity"] = consumption_values[1]
             fields["gas_unit"] = "m3"
 
+    if is_steg_bill and ("quantity" not in fields or "gas_quantity" not in fields):
+        priced_consumptions = _extract_consumption_from_prices(normalized)
+        if "quantity" not in fields and priced_consumptions.get("electricity") is not None:
+            fields["quantity"] = priced_consumptions["electricity"]
+            fields["unit"] = "kWh"
+        if "gas_quantity" not in fields and priced_consumptions.get("gas") is not None:
+            fields["gas_quantity"] = priced_consumptions["gas"]
+            fields["gas_unit"] = "m3"
+
     quantity_match = re.search(r"([0-9]+(?:[,.][0-9]+)?)\s*(kwh|m3|m³|t|tonnes?|litres?|l)\b", normalized, re.IGNORECASE)
     if quantity_match and "quantity" not in fields:
         fields["quantity"] = _parse_float(quantity_match.group(1))
@@ -192,11 +201,12 @@ def _normalize_for_search(value: str) -> str:
 
 
 def _extract_total_amount(text: str) -> float | None:
-    label_match = re.search(r"(?:montant\s+total|total\s+ttc|total\s+consommation\s*&\s*services)(.{0,45})", text, re.IGNORECASE)
-    if label_match:
-        parsed = _last_amount_in_text(label_match.group(1), min_value=10)
-        if parsed is not None:
-            return parsed
+    for label_pattern in (r"montant\s+total", r"total\s+ttc", r"total\s+consommation\s*&\s*services"):
+        label_match = re.search(rf"(?:{label_pattern})(.{{0,45}})", text, re.IGNORECASE)
+        if label_match:
+            parsed = _first_amount_in_text(label_match.group(1), min_value=10)
+            if parsed is not None:
+                return parsed
 
     direct_match = re.search(r"(?:montant|total|ttc)\s*[:=]?\s*([0-9]+(?:[,.][0-9]+)?)", text, re.IGNORECASE)
     if direct_match:
@@ -238,6 +248,11 @@ def _last_amount_in_text(text: str, min_value: float = 0) -> float | None:
     return amounts[-1] if amounts else None
 
 
+def _first_amount_in_text(text: str, min_value: float = 0) -> float | None:
+    amounts = _amount_candidates(text, min_value=min_value)
+    return amounts[0] if amounts else None
+
+
 def _amount_candidates(text: str, min_value: float = 0) -> list[float]:
     amounts: list[float] = []
     for raw in re.findall(r"\b([0-9]+[,.][0-9]{2,3})\b", text):
@@ -269,6 +284,47 @@ def _extract_consumption_from_indexes(text: str) -> list[float]:
         if 5 <= difference <= 50000 and difference not in values:
             values.append(float(difference))
     return values[:2]
+
+
+def _extract_consumption_from_prices(text: str) -> dict[str, float]:
+    searchable = _normalize_for_search(text)
+    gas_index = searchable.find("gaz")
+    electricity_text = text[:gas_index] if gas_index >= 0 else text
+    gas_text = text[gas_index:] if gas_index >= 0 else ""
+
+    electricity = _best_quantity_from_price_pairs(electricity_text)
+    gas = _best_quantity_from_price_pairs(gas_text)
+    if electricity is None or gas is None:
+        fallback = _quantities_from_price_pairs(text)
+        if electricity is None and fallback:
+            electricity = fallback[0]
+        if gas is None and len(fallback) > 1:
+            gas = next((value for value in fallback[1:] if value != electricity), None)
+
+    result: dict[str, float] = {}
+    if electricity is not None:
+        result["electricity"] = electricity
+    if gas is not None:
+        result["gas"] = gas
+    return result
+
+
+def _best_quantity_from_price_pairs(text: str) -> float | None:
+    quantities = _quantities_from_price_pairs(text)
+    return max(quantities) if quantities else None
+
+
+def _quantities_from_price_pairs(text: str) -> list[float]:
+    numbers = [_parse_float(match.group(1)) for match in re.finditer(r"\b([0-9]+[,.][0-9]{3})\b", text)]
+    decimals = [value for value in numbers if value is not None]
+    quantities: list[float] = []
+    for amount, unit_price in zip(decimals, decimals[1:], strict=False):
+        if amount < 1 or unit_price <= 0 or unit_price >= 2:
+            continue
+        quantity = round(amount / unit_price)
+        if 5 <= quantity <= 50000 and abs((unit_price * quantity) - amount) <= 0.02 and float(quantity) not in quantities:
+            quantities.append(float(quantity))
+    return quantities
 
 
 def _extract_after_keywords(text: str, keywords: tuple[str, ...], window: int = 120) -> float | None:
