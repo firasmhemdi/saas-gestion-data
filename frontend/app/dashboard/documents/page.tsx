@@ -39,10 +39,10 @@ export default function DocumentsPage() {
   const [documents, setDocuments] = useState<DocumentRecord[]>([]);
   const [sites, setSites] = useState<Site[]>([]);
   const [indicators, setIndicators] = useState<Indicator[]>([]);
-  const [filename, setFilename] = useState("facture-energie.txt");
+  const [filename, setFilename] = useState("");
   const [siteId, setSiteId] = useState("");
   const [indicatorId, setIndicatorId] = useState("");
-  const [rawText, setRawText] = useState("Facture énergie\nFournisseur: STEG\nDate: 2026-02-15\nTotal: 450.25\nConsommation: 1240 kWh");
+  const [rawText, setRawText] = useState("");
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
   const [selected, setSelected] = useState<DocumentRecord | null>(null);
@@ -58,6 +58,7 @@ export default function DocumentsPage() {
     setSelected(document);
     setFilename(document.filename);
     setRawText(document.raw_text);
+    setSiteId(document.site_id ? String(document.site_id) : "");
     const current = document.extracted_data?.fields ?? {};
     setFields(Object.fromEntries(editableFields.map((key) => [key, String(current[key] ?? "")])));
   }, []);
@@ -93,11 +94,32 @@ export default function DocumentsPage() {
   const extractedCount = editableFields.filter((key) => fields[key]).length;
   const missingRequired = requiredFields.filter((key) => !fields[key]);
   const validationReady = missingRequired.length === 0;
+  const selectedIndicator = indicators.find((indicator) => String(indicator.id) === indicatorId);
+  const currentSite = sites.find((site) => String(site.id) === siteId);
+
+  function resetDocumentForm() {
+    if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
+    setFilename("");
+    setSiteId("");
+    setIndicatorId("");
+    setRawText("");
+    setImageFile(null);
+    setImagePreviewUrl(null);
+    setSelected(null);
+    setFields({});
+    setOcrProgress(0);
+    setError(null);
+    setMessage(null);
+    setShowRawText(false);
+  }
 
   async function readFile(file: File) {
     setFilename(file.name);
     setError(null);
     setMessage(null);
+    setSelected(null);
+    setFields({});
+    setIndicatorId("");
     if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
 
     if (file.type.startsWith("image/")) {
@@ -105,7 +127,8 @@ export default function DocumentsPage() {
       setImagePreviewUrl(URL.createObjectURL(file));
       setRawText("");
       setOcrProgress(0);
-      setMessage("Photo importée. Lancez l'extraction automatique, puis vérifiez les champs.");
+      setMessage("Photo importée. Extraction et analyse automatiques en cours.");
+      void extractTextFromImage(file);
       return;
     }
 
@@ -118,11 +141,13 @@ export default function DocumentsPage() {
       return;
     }
 
-    setRawText(await file.text());
+    const text = await file.text();
+    setRawText(text);
+    if (text.trim()) void analyzeDocument(text, file.name);
   }
 
-  async function extractTextFromImage() {
-    if (!imageFile) return;
+  async function extractTextFromImage(fileToExtract: File | null = imageFile) {
+    if (!fileToExtract) return;
     setOcrBusy(true);
     setOcrProgress(0);
     setError(null);
@@ -138,14 +163,15 @@ export default function DocumentsPage() {
         },
       });
       worker = activeWorker;
-      const result = await activeWorker.recognize(imageFile);
+      const result = await activeWorker.recognize(fileToExtract);
       const extractedText = (result.data.text ?? "").trim();
       if (!extractedText) {
         setError("OCR terminé, mais aucun texte exploitable n'a été détecté. Essayez une photo plus nette ou complétez les champs visibles.");
         return;
       }
       setRawText(extractedText);
-      setMessage("Texte extrait automatiquement. Vous pouvez maintenant analyser le document.");
+      setMessage("Texte extrait. Analyse des champs en cours.");
+      await analyzeDocument(extractedText, fileToExtract.name);
     } catch {
       setError("Impossible d'extraire automatiquement le texte. Vérifiez la connexion ou complétez les valeurs visibles manuellement.");
     } finally {
@@ -154,25 +180,31 @@ export default function DocumentsPage() {
     }
   }
 
-  async function uploadDocument(event: React.FormEvent) {
-    event.preventDefault();
+  async function analyzeDocument(textOverride?: string, filenameOverride?: string) {
+    const textToAnalyze = textOverride ?? rawText;
+    const nameToUse = filenameOverride ?? filename;
+    if (!textToAnalyze) return;
     setBusy(true);
     setError(null);
-    setMessage(null);
     try {
       const document = await api.post<DocumentRecord>("/documents", {
-        filename,
-        raw_text: rawText,
+        filename: nameToUse || "document-importe",
+        raw_text: textToAnalyze,
         site_id: siteId ? Number(siteId) : null,
       });
       selectDocument(document);
-      setMessage("Document analysé.");
+      setMessage("Document analysé. Vérifiez les champs puis validez l'intégration.");
       await load();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Impossible d'analyser le document.");
     } finally {
       setBusy(false);
     }
+  }
+
+  async function uploadDocument(event: React.FormEvent) {
+    event.preventDefault();
+    await analyzeDocument();
   }
 
   async function validateDocument() {
@@ -219,14 +251,12 @@ export default function DocumentsPage() {
     <>
       <Navbar />
       <main className="mx-auto max-w-7xl px-4 py-8">
-        <section className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
-          <div className="flex flex-wrap items-end justify-between gap-5">
+        <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-5">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Traitement documentaire intelligent</p>
-              <h1 className="mt-2 text-3xl font-bold tracking-tight text-slate-950">Extraction automatique OCR</h1>
-              <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500">
-                Importez une facture, extrayez le texte automatiquement, contrôlez les champs clés et intégrez la donnée au référentiel ESG.
-              </p>
+              <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Documents</p>
+              <h1 className="mt-1 text-2xl font-bold tracking-tight text-slate-950">Factures et justificatifs ESG</h1>
+              <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500">Un espace de travail pour transformer une photo de facture en donnée environnementale validée.</p>
             </div>
             <div className="grid grid-cols-3 gap-2 text-center">
               {[
@@ -243,9 +273,9 @@ export default function DocumentsPage() {
           </div>
           <div className="mt-5 grid gap-2 md:grid-cols-3">
             {[
-              ["1", "Importer", imagePreviewUrl || rawText ? "En cours" : "À faire"],
-              ["2", "Extraire", rawText ? "Texte prêt" : "OCR requis"],
-              ["3", "Valider", validationReady ? "Prêt" : `${missingRequired.length} champ(s) manquant(s)`],
+              ["1", "Importer", imagePreviewUrl || rawText ? "Document chargé" : "En attente"],
+              ["2", "Extraire", busy || ocrBusy ? "Automatique" : rawText ? "Champs détectés" : "Non lancé"],
+              ["3", "Valider", selected ? (validationReady ? "Prêt" : "Correction requise") : "Après analyse"],
             ].map(([step, title, state]) => (
               <div key={step} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
                 <div className="flex items-center gap-3">
@@ -268,18 +298,20 @@ export default function DocumentsPage() {
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <h2 className="font-semibold text-slate-950">Dépôt et analyse</h2>
-                <p className="mt-1 text-sm text-slate-500">Photo, image ou fichier texte. L&apos;OCR se lance depuis la prévisualisation.</p>
+                <p className="mt-1 text-sm text-slate-500">Importez une photo nette de facture. Les champs se remplissent automatiquement.</p>
               </div>
-              <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-500">OCR local</span>
+              <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${ocrBusy || busy ? "bg-amber-50 text-amber-700" : "bg-emerald-50 text-emerald-700"}`}>
+                {ocrBusy ? "OCR en cours" : busy ? "Analyse en cours" : "Mode automatique"}
+              </span>
             </div>
             <div className="mt-4 grid gap-4 sm:grid-cols-2">
               <label className="text-sm font-medium text-slate-700">
                 Fichier
-                <input type="file" accept=".txt,.csv,.pdf,.jpg,.jpeg,.png,.webp" onChange={(e) => e.target.files?.[0] && readFile(e.target.files[0])} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                <input type="file" accept=".txt,.csv,.pdf,.jpg,.jpeg,.png,.webp" onChange={(e) => e.target.files?.[0] && readFile(e.target.files[0])} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm file:mr-3 file:rounded-md file:border-0 file:bg-slate-950 file:px-3 file:py-1.5 file:text-sm file:font-semibold file:text-white" />
               </label>
               <label className="text-sm font-medium text-slate-700">
                 Nom
-                <input value={filename} onChange={(e) => setFilename(e.target.value)} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                <input value={filename} onChange={(e) => setFilename(e.target.value)} placeholder="Nom du document" className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
               </label>
               <label className="text-sm font-medium text-slate-700 sm:col-span-2">
                 Site
@@ -291,12 +323,12 @@ export default function DocumentsPage() {
             </div>
             {imagePreviewUrl ? (
               <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
-                <div className="relative h-72 w-full">
+                <div className="relative h-80 w-full overflow-hidden rounded-md bg-white">
                   <Image src={imagePreviewUrl} alt={filename} fill unoptimized className="rounded-md object-contain" />
                 </div>
                 <div className="mt-3 flex flex-wrap items-center gap-3">
-                  <button type="button" onClick={extractTextFromImage} disabled={ocrBusy || busy} className="rounded-lg bg-slate-950 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700 disabled:opacity-60">
-                    {ocrBusy ? "Extraction..." : "Extraire automatiquement"}
+                  <button type="button" onClick={() => extractTextFromImage()} disabled={ocrBusy || busy} className="rounded-lg bg-slate-950 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60">
+                    {ocrBusy ? "Extraction..." : "Relancer l'extraction"}
                   </button>
                   {ocrBusy ? (
                     <div className="min-w-40 flex-1">
@@ -326,16 +358,21 @@ export default function DocumentsPage() {
                 </label>
               ) : null}
             </div>
-            <button disabled={busy || ocrBusy || !rawText} className="mt-4 w-full rounded-lg bg-slate-950 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-slate-800 disabled:opacity-60">
-              {busy ? "Analyse en cours..." : "Analyser le document"}
-            </button>
+            <div className="mt-4 grid gap-2 sm:grid-cols-[1fr_auto]">
+              <button disabled={busy || ocrBusy || !rawText} className="rounded-lg bg-slate-950 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-slate-800 disabled:opacity-60">
+                {busy ? "Analyse en cours..." : selected ? "Mettre à jour l'analyse" : "Analyser le document"}
+              </button>
+              <button type="button" onClick={resetDocumentForm} className="rounded-lg border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+                Nouveau
+              </button>
+            </div>
           </form>
 
           <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h2 className="font-semibold text-slate-950">Contrôle et validation</h2>
-                <p className="mt-1 text-sm text-slate-500">Vérifiez les valeurs avant de créer la donnée environnementale.</p>
+                <p className="mt-1 text-sm text-slate-500">Les champs reconnus sont prêts à être corrigés puis intégrés.</p>
               </div>
               {selected ? <span className="rounded-full bg-sky-50 px-2.5 py-1 text-xs font-semibold text-sky-700">{documentTypeLabels[selected.document_type]}</span> : null}
             </div>
@@ -345,7 +382,9 @@ export default function DocumentsPage() {
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
                       <p className="text-sm font-semibold text-slate-900">{selected.filename}</p>
-                      <p className="mt-1 text-xs text-slate-500">Confiance {selected.extracted_data?.confidence ?? 0}% · statut {selected.status}</p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        Confiance {selected.extracted_data?.confidence ?? 0}% · {currentSite?.name ?? "Site non renseigné"}
+                      </p>
                     </div>
                     <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${validationReady ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>
                       {validationReady ? "Prêt à valider" : "À compléter"}
@@ -357,32 +396,60 @@ export default function DocumentsPage() {
                     </p>
                   ) : null}
                 </div>
+
+                <div className="mt-4 grid gap-2 sm:grid-cols-3">
+                  {[
+                    ["Électricité", fields.quantity ? `${fields.quantity} ${fields.unit || ""}`.trim() : "--"],
+                    ["Gaz", fields.gas_quantity ? `${fields.gas_quantity} ${fields.gas_unit || ""}`.trim() : "--"],
+                    ["À payer", fields.amount_due ? `${fields.amount_due} TND` : fields.amount ? `${fields.amount} TND` : "--"],
+                  ].map(([label, value]) => (
+                    <div key={label} className="rounded-lg border border-slate-200 bg-white p-3">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">{label}</p>
+                      <p className="mt-1 text-lg font-bold text-slate-950">{value}</p>
+                    </div>
+                  ))}
+                </div>
+
                 <div className="mt-4 grid gap-3 sm:grid-cols-2">
                   {editableFields.map((key) => (
                     <label key={key} className="text-sm font-medium text-slate-700">
                       {fieldLabels[key] ?? key}
-                      <input value={fields[key] ?? ""} onChange={(e) => setFields({ ...fields, [key]: e.target.value })} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                      <input
+                        value={fields[key] ?? ""}
+                        onChange={(e) => setFields({ ...fields, [key]: e.target.value })}
+                        className={`mt-1 w-full rounded-lg border px-3 py-2 text-sm ${
+                          requiredFields.includes(key) && !fields[key]
+                            ? "border-amber-300 bg-amber-50"
+                            : "border-slate-300 bg-white"
+                        }`}
+                      />
                     </label>
                   ))}
                   <label className="text-sm font-medium text-slate-700 sm:col-span-2">
-                    Indicateur à alimenter
+                    <span className="flex items-center justify-between gap-3">
+                      Indicateur à alimenter
+                      {selectedIndicator ? <span className="text-xs font-semibold text-emerald-700">Proposé automatiquement</span> : null}
+                    </span>
                     <select value={indicatorId} onChange={(e) => setIndicatorId(e.target.value)} className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm">
                       <option value="">Non renseigné</option>
                       {indicators.map((indicator) => <option key={indicator.id} value={indicator.id}>{indicator.name}</option>)}
                     </select>
                   </label>
                 </div>
-                <div className="mt-4 flex flex-wrap gap-2">
-                  <button type="button" onClick={validateDocument} disabled={busy || !validationReady} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-60">
-                    Valider l&apos;extraction
+                <div className="mt-5 flex flex-wrap gap-2">
+                  <button type="button" onClick={validateDocument} disabled={busy || !validationReady} className="rounded-lg bg-emerald-600 px-5 py-3 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:opacity-60">
+                    Valider et intégrer
                   </button>
-                  <button type="button" onClick={reanalyzeDocument} disabled={busy} className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60">
+                  <button type="button" onClick={reanalyzeDocument} disabled={busy} className="rounded-lg border border-slate-300 bg-white px-5 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60">
                     Réanalyser
                   </button>
                 </div>
               </>
             ) : (
-              <p className="mt-8 text-sm text-slate-500">Sélectionnez ou analysez un document pour corriger ses champs.</p>
+              <div className="mt-6 rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-10 text-center">
+                <p className="font-semibold text-slate-900">Aucun document en cours</p>
+                <p className="mt-2 text-sm text-slate-500">Importez une facture pour afficher les champs extraits ici.</p>
+              </div>
             )}
           </div>
         </section>
