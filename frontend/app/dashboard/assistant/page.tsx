@@ -64,16 +64,16 @@ export default function AssistantPage() {
   return (
     <>
       <Navbar />
-      <main className="mx-auto max-w-6xl px-4 py-8">
+      <main className="mx-auto max-w-7xl px-6 py-6 lg:px-8">
         <div>
           <p className="text-xs font-semibold uppercase tracking-wide text-teal-700">Analyse augmentée</p>
-          <h1 className="text-2xl font-bold text-slate-950">Assistant IA sourcé</h1>
+          <h1 className="mt-1 text-2xl font-bold text-slate-950">Assistant IA sourcé</h1>
           <p className="mt-1 text-sm text-slate-500">
             Posez une question métier; l&apos;assistant répond avec les données disponibles et cite les sources utilisées.
           </p>
         </div>
 
-        <section className="mt-6 grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
+        <section className="mt-6 grid gap-5 lg:grid-cols-[1.1fr_0.9fr]">
           <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
             <div className="mb-5 grid gap-3 sm:grid-cols-3">
               {promptGroups.map(([label, prompt]) => (
