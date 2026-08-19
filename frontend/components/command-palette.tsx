@@ -42,10 +42,10 @@ export function CommandPalette() {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="hidden h-11 items-center rounded-xl border border-white/10 bg-white px-4 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 focus-visible:outline-emerald-300 md:inline-flex"
+        className="hidden h-10 items-center rounded-xl border border-white/10 bg-white px-3 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 focus-visible:outline-emerald-300 md:inline-flex 2xl:px-3.5"
       >
         Rechercher
-        <span className="ml-2 rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-500">Ctrl K</span>
+        <span className="ml-2 hidden rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-500 2xl:inline">Ctrl K</span>
       </button>
 
       {open ? (

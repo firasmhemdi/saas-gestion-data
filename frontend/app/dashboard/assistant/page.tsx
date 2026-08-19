@@ -64,7 +64,7 @@ export default function AssistantPage() {
   return (
     <>
       <Navbar />
-      <main className="mx-auto max-w-7xl px-6 py-6 lg:px-8">
+      <main className="mx-auto max-w-[1440px] px-5 py-6 lg:px-6 xl:px-8">
         <div>
           <p className="text-xs font-semibold uppercase tracking-wide text-teal-700">Analyse augmentée</p>
           <h1 className="mt-1 text-2xl font-bold text-slate-950">Assistant IA sourcé</h1>

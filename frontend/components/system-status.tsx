@@ -32,7 +32,7 @@ export function SystemStatus() {
   const dot = online === null ? "bg-amber-400" : online ? "bg-emerald-500" : "bg-rose-500";
 
   return (
-    <div className="hidden h-11 items-center gap-2 rounded-xl border border-white/10 bg-white px-3.5 text-xs font-semibold text-slate-700 shadow-sm transition xl:flex">
+    <div className="hidden h-10 items-center gap-2 rounded-xl border border-white/10 bg-white px-3 text-xs font-semibold text-slate-700 shadow-sm transition xl:flex">
       <span className={`h-2 w-2 rounded-full ${dot}`} />
       {label}
     </div>
