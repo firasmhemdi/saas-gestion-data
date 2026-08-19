@@ -66,7 +66,7 @@ export default function AssistantPage() {
       <Navbar />
       <main className="mx-auto max-w-6xl px-4 py-8">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-wide text-teal-700">Sprint 8</p>
+          <p className="text-xs font-semibold uppercase tracking-wide text-teal-700">Analyse augmentée</p>
           <h1 className="text-2xl font-bold text-slate-950">Assistant IA sourcé</h1>
           <p className="mt-1 text-sm text-slate-500">
             Posez une question métier; l&apos;assistant répond avec les données disponibles et cite les sources utilisées.

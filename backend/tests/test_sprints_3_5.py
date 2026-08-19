@@ -1,5 +1,6 @@
 from fastapi.testclient import TestClient
 
+from app.services.ingestion import extract_document_fields
 from tests.helpers import auth_headers, register
 
 
@@ -108,3 +109,53 @@ class TestSprints3To5:
         entries = client.get("/api/v1/data", headers=auth_headers(admin["access_token"])).json()
         assert len(entries) == 1
         assert entries[0]["value"] == 1240
+
+    def test_steg_invoice_uses_meter_indexes_and_real_totals(self):
+        text = """
+        Société Tunisienne de l'Electricité et du Gaz
+        Facture sur relevé du 2025-12-01 au 2026-03-30
+        Montant HT 37.312 P.U. 0.176 Quantité 212 Index nouveau 72866 ancien 72654
+        Total Electricité 56.912
+        Gaz naturel Montant 12.012 P.U. 0.231 Quantité 52 Index nouveau 3922 ancien 3870
+        Total Gaz 15.012
+        Total Consommation & Services 71.924
+        MONTANT TOTAL (16) 85.352
+        Arriérés 902.085
+        987.000 Montant à payer
+        """
+
+        fields, confidence = extract_document_fields(text)
+
+        assert fields["provider"] == "STEG"
+        assert fields["period_start"] == "2025-12-01"
+        assert fields["period_end"] == "2026-03-30"
+        assert fields["amount"] == 85.352
+        assert fields["amount_due"] == 987.0
+        assert fields["quantity"] == 212
+        assert fields["unit"] == "kWh"
+        assert fields["gas_quantity"] == 52
+        assert fields["gas_unit"] == "m3"
+        assert confidence >= 85
+
+    def test_document_can_be_reanalyzed_with_latest_rules(self, client: TestClient):
+        admin = self._admin(client)
+        created = client.post(
+            "/api/v1/documents",
+            json={
+                "filename": "facture-steg-photo.txt",
+                "raw_text": "STEG Facture 2025-12-01 2026-03-30 Index nouveau 72866 ancien 72654 Gaz Index nouveau 3922 ancien 3870 987.000 Montant a payer",
+            },
+            headers=auth_headers(admin["access_token"]),
+        )
+        assert created.status_code == 201, created.text
+
+        reanalyzed = client.post(
+            f"/api/v1/documents/{created.json()['id']}/reanalyze",
+            headers=auth_headers(admin["access_token"]),
+        )
+
+        assert reanalyzed.status_code == 200, reanalyzed.text
+        fields = reanalyzed.json()["extracted_data"]["fields"]
+        assert fields["quantity"] == 212
+        assert fields["gas_quantity"] == 52
+        assert fields["amount_due"] == 987

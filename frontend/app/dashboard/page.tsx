@@ -17,13 +17,13 @@ const quickActions = [
   ["Documents", "/dashboard/documents", "Extraire et valider les factures/bordereaux."],
 ];
 
-const sprintModules = [
-  ["S3", "Collecte", "Imports, saisie et journal des traitements", "/dashboard/imports", "Livré"],
-  ["S4", "ERP & Mapping", "Connecteurs, règles et synchronisations", "/dashboard/mapping", "Livré"],
-  ["S5", "Documents", "OCR/NLP, classification et validation humaine", "/dashboard/documents", "Livré"],
-  ["S6", "Qualité", "Alertes, normalisation et workflow de validation", "/dashboard/quality", "Amélioré"],
-  ["S7", "Analytics ESG", "Indicateurs, émissions et comparaisons multi-sites", "/dashboard/analytics", "Amélioré"],
-  ["S8", "Assistant IA", "Questions métier, citations et historique", "/dashboard/assistant", "Amélioré"],
+const businessModules = [
+  ["Collecte", "Données", "Imports, saisie et journal des traitements", "/dashboard/imports", "Opérationnel"],
+  ["Intégration", "Mapping", "Connecteurs, règles et synchronisations", "/dashboard/mapping", "Opérationnel"],
+  ["Documents", "OCR", "Photos, classification et validation humaine", "/dashboard/documents", "Automatisé"],
+  ["Qualité", "Contrôle", "Alertes, normalisation et workflow de validation", "/dashboard/quality", "Automatisé"],
+  ["Analytics", "ESG", "Indicateurs, émissions et comparaisons multi-sites", "/dashboard/analytics", "Pilotage"],
+  ["Assistant", "IA", "Questions métier, citations et historique", "/dashboard/assistant", "Sourcé"],
 ];
 
 function OtpToggle() {
@@ -60,7 +60,7 @@ function OtpToggle() {
           <p className="mt-1 text-sm leading-6 text-slate-500">
             {user.otp_enabled
               ? "La double authentification est active sur ce compte."
-              : "Activez l'OTP pour renforcer la crédibilité sécurité de la démo."}
+              : "Activez l'OTP pour renforcer la protection des comptes sensibles."}
           </p>
         </div>
         <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${user.otp_enabled ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>
@@ -115,13 +115,13 @@ export default function DashboardPage() {
               Bonjour {user.full_name.split(" ")[0]}, votre plateforme couvre maintenant toute la chaîne ESG.
             </h1>
             <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-600">
-              De la collecte brute jusqu&apos;au dashboard et à l&apos;assistant IA, chaque module montre une valeur métier claire pour l&apos;entreprise et pour la soutenance.
+              De la collecte brute jusqu&apos;au dashboard et à l&apos;assistant IA, chaque module apporte une valeur métier claire pour piloter les données environnementales.
             </p>
             <div className="mt-6 grid gap-3 sm:grid-cols-3">
               {[
-                ["Sprints", "1-8", "Périmètre fonctionnel complet"],
-                ["Qualité", "Workflow", "Alertes, normalisation, validation"],
-                ["Restitution", "ESG + IA", "KPI, scopes et réponses sourcées"],
+                ["Périmètre", "Complet", "Collecte, qualité, reporting"],
+                ["Fiabilité", "Workflow", "Alertes, normalisation, validation"],
+                ["Pilotage", "ESG + IA", "KPI, scopes et réponses sourcées"],
               ].map(([label, value, detail]) => (
                 <div key={label} className="rounded-lg border border-slate-200 bg-slate-50 p-4">
                   <p className="text-xs uppercase tracking-wide text-slate-400">{label}</p>
@@ -177,20 +177,20 @@ export default function DashboardPage() {
             <div className="app-surface rounded-lg p-5">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <h2 className="text-lg font-semibold text-slate-950">Feuille de route fonctionnelle</h2>
-                <p className="mt-1 text-sm text-slate-500">Vue synthétique des modules qui structurent la démonstration.</p>
+                <h2 className="text-lg font-semibold text-slate-950">Modules métier</h2>
+                <p className="mt-1 text-sm text-slate-500">Vue synthétique des capacités clés de la plateforme.</p>
               </div>
-              <span className="rounded-full bg-teal-50 px-3 py-1 text-xs font-semibold text-teal-700">Release 1 à 4</span>
+              <span className="rounded-full bg-teal-50 px-3 py-1 text-xs font-semibold text-teal-700">Production ready</span>
             </div>
             <div className="mt-5 grid gap-3 md:grid-cols-2">
-              {sprintModules.map(([sprint, title, description, href, status]) => (
-                <Link key={sprint} href={href} className="rounded-lg border border-slate-200 bg-white p-4 transition hover:border-teal-200 hover:bg-teal-50/40">
+              {businessModules.map(([area, title, description, href, status]) => (
+                <Link key={area} href={href} className="rounded-lg border border-slate-200 bg-white p-4 transition hover:border-teal-200 hover:bg-teal-50/40">
                   <div className="flex items-start justify-between gap-3">
                     <div>
-                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">{sprint}</p>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">{area}</p>
                       <h3 className="mt-1 font-semibold text-slate-950">{title}</h3>
                     </div>
-                    <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${status === "Livré" ? "bg-emerald-50 text-emerald-700" : "bg-teal-50 text-teal-700"}`}>
+                    <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${status === "Opérationnel" ? "bg-emerald-50 text-emerald-700" : "bg-teal-50 text-teal-700"}`}>
                       {status}
                     </span>
                   </div>

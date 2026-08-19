@@ -175,7 +175,7 @@ export default function RegisterPage() {
           id="company_name"
           name="company_name"
           required
-          placeholder="Acme SAS"
+          placeholder="Nom de votre entreprise"
         />
         <Field
           label="Email professionnel"

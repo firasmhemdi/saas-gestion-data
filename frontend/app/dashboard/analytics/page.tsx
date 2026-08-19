@@ -65,7 +65,7 @@ export default function AnalyticsPage() {
       <main className="mx-auto max-w-6xl px-4 py-8">
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-teal-700">Sprint 7</p>
+            <p className="text-xs font-semibold uppercase tracking-wide text-teal-700">Pilotage environnemental</p>
             <h1 className="text-2xl font-bold text-slate-950">Dashboard ESG</h1>
             <p className="mt-1 text-sm text-slate-500">
               Suivez les consommations, déchets et émissions carbone par site et par scope.

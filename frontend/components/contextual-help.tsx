@@ -48,10 +48,10 @@ const helpByRoute = [
   {
     match: "/dashboard",
     title: "Parcours recommandé",
-    description: "Présentez l'app de bout en bout: collecte, qualité, analytics puis assistant IA.",
+    description: "Parcourez l'application de bout en bout : collecte, qualité, analytics puis assistant IA.",
     actions: [
-      ["Commencer la démo", "/dashboard/entry"],
-      ["Mode présentation", "/dashboard"],
+      ["Saisir une donnée", "/dashboard/entry"],
+      ["Parcours guidé", "/dashboard"],
       ["Recherche rapide", "/dashboard"],
     ],
   },

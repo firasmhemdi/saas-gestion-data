@@ -50,6 +50,8 @@ export default function DocumentsPage() {
 
   const selectDocument = useCallback((document: DocumentRecord) => {
     setSelected(document);
+    setFilename(document.filename);
+    setRawText(document.raw_text);
     const current = document.extracted_data?.fields ?? {};
     setFields(Object.fromEntries(editableFields.map((key) => [key, String(current[key] ?? "")])));
   }, []);
@@ -179,14 +181,31 @@ export default function DocumentsPage() {
     }
   }
 
+  async function reanalyzeDocument() {
+    if (!selected) return;
+    setBusy(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const document = await api.post<DocumentRecord>(`/documents/${selected.id}/reanalyze`);
+      selectDocument(document);
+      setMessage("Document réanalysé avec les règles d'extraction les plus récentes.");
+      await load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Impossible de réanalyser le document.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <>
       <Navbar />
       <main className="mx-auto max-w-6xl px-4 py-8">
         <div>
-          <p className="text-xs font-semibold uppercase text-emerald-700">Sprint 5</p>
-          <h1 className="text-2xl font-bold text-slate-950">Extraction documentaire OCR/NLP</h1>
-          <p className="mt-1 text-sm text-slate-500">Déposez une facture ou un bordereau, corrigez les champs extraits, puis validez avant intégration.</p>
+          <p className="text-xs font-semibold uppercase text-emerald-700">Traitement documentaire intelligent</p>
+          <h1 className="text-2xl font-bold text-slate-950">Extraction automatique OCR</h1>
+          <p className="mt-1 text-sm text-slate-500">Déposez une facture ou un bordereau, laissez l&apos;app extraire les valeurs, puis validez avant intégration.</p>
         </div>
 
         {error ? <p className="mt-6 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p> : null}
@@ -264,9 +283,14 @@ export default function DocumentsPage() {
                     </select>
                   </label>
                 </div>
-                <button type="button" onClick={validateDocument} disabled={busy} className="mt-4 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-60">
-                  Valider l&apos;extraction
-                </button>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <button type="button" onClick={validateDocument} disabled={busy} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-60">
+                    Valider l&apos;extraction
+                  </button>
+                  <button type="button" onClick={reanalyzeDocument} disabled={busy} className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60">
+                    Réanalyser
+                  </button>
+                </div>
               </>
             ) : (
               <p className="mt-8 text-sm text-slate-500">Sélectionnez ou analysez un document pour corriger ses champs.</p>

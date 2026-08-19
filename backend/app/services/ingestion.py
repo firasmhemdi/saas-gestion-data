@@ -104,6 +104,7 @@ def extract_document_fields(text: str) -> tuple[dict[str, Any], int]:
     normalized = " ".join(text.split())
     searchable = _normalize_for_search(normalized)
     fields: dict[str, Any] = {}
+    is_steg_bill = any(keyword in searchable for keyword in ("steg", "societe tunisienne", "electricite et du gaz", "montant a payer"))
 
     dates = re.findall(r"(\d{4}-\d{2}-\d{2}|\d{2}[/-]\d{2}[/-]\d{4})", normalized)
     if dates:
@@ -111,14 +112,12 @@ def extract_document_fields(text: str) -> tuple[dict[str, Any], int]:
         if parsed:
             fields["document_date"] = parsed.isoformat()
     parsed_dates = [parsed for raw in dates if (parsed := _parse_date(raw))]
-    for index, first_period in enumerate(parsed_dates):
-        second_period = next((candidate for candidate in parsed_dates[index + 1 :] if first_period < candidate), None)
-        if second_period:
-            fields["period_start"] = first_period.isoformat()
-            fields["period_end"] = second_period.isoformat()
-            break
+    period = _extract_period(parsed_dates, prefer_earliest=is_steg_bill)
+    if period:
+        fields["period_start"] = period[0].isoformat()
+        fields["period_end"] = period[1].isoformat()
 
-    if "steg" in searchable or "societe tunisienne" in searchable or "electricite et du gaz" in searchable:
+    if is_steg_bill:
         fields["provider"] = "STEG"
 
     amount_due = _extract_amount_due(normalized)
@@ -129,23 +128,32 @@ def extract_document_fields(text: str) -> tuple[dict[str, Any], int]:
     if amount is not None:
         fields["amount"] = amount
 
+    if is_steg_bill and "index" in searchable:
+        consumption_values = _extract_consumption_from_indexes(normalized)
+        if consumption_values:
+            fields["quantity"] = consumption_values[0]
+            fields["unit"] = "kWh"
+        if len(consumption_values) > 1:
+            fields["gas_quantity"] = consumption_values[1]
+            fields["gas_unit"] = "m3"
+
     quantity_match = re.search(r"([0-9]+(?:[,.][0-9]+)?)\s*(kwh|m3|m³|t|tonnes?|litres?|l)\b", normalized, re.IGNORECASE)
-    if quantity_match:
+    if quantity_match and "quantity" not in fields:
         fields["quantity"] = _parse_float(quantity_match.group(1))
         fields["unit"] = quantity_match.group(2)
-    elif any(keyword in searchable for keyword in ("electricite", "eclairage", "kwh")):
+    elif "quantity" not in fields and any(keyword in searchable for keyword in ("electricite", "eclairage", "kwh")):
         electricity_quantity = _extract_after_keywords(normalized, ("electricite", "électricité", "eclairage", "éclairage"), window=140)
-        if electricity_quantity is not None:
+        if electricity_quantity is not None and electricity_quantity >= 20:
             fields["quantity"] = electricity_quantity
             fields["unit"] = "kWh"
 
     gas_match = re.search(r"([0-9]+(?:[,.][0-9]+)?)\s*(m3|m³)\b", normalized, re.IGNORECASE)
-    if gas_match:
+    if gas_match and "gas_quantity" not in fields:
         fields["gas_quantity"] = _parse_float(gas_match.group(1))
         fields["gas_unit"] = gas_match.group(2)
-    elif "gaz" in searchable:
+    elif "gas_quantity" not in fields and "gaz" in searchable:
         gas_quantity = _extract_after_keywords(normalized, ("gaz",), window=140)
-        if gas_quantity is not None and gas_quantity != fields.get("quantity"):
+        if gas_quantity is not None and gas_quantity >= 5 and gas_quantity != fields.get("quantity"):
             fields["gas_quantity"] = gas_quantity
             fields["gas_unit"] = "m3"
 
@@ -153,7 +161,7 @@ def extract_document_fields(text: str) -> tuple[dict[str, Any], int]:
     if supplier_match:
         fields["provider"] = supplier_match.group(1).strip()
 
-    confidence = min(95, 45 + len(fields) * 12)
+    confidence = _estimate_extraction_confidence(fields, is_steg_bill)
     return fields, confidence
 
 
@@ -184,31 +192,83 @@ def _normalize_for_search(value: str) -> str:
 
 
 def _extract_total_amount(text: str) -> float | None:
-    patterns = (
-        r"(?:montant\s+total|total\s+ttc|total\s+consommation\s*&\s*services)\D{0,40}([0-9]+(?:[,.][0-9]+)?)",
-        r"(?:montant|total|ttc)\s*[:=]?\s*([0-9]+(?:[,.][0-9]+)?)",
-    )
-    for pattern in patterns:
-        match = re.search(pattern, text, re.IGNORECASE)
-        if match:
-            parsed = _parse_float(match.group(1))
-            if parsed is not None:
-                return parsed
+    label_match = re.search(r"(?:montant\s+total|total\s+ttc|total\s+consommation\s*&\s*services)(.{0,45})", text, re.IGNORECASE)
+    if label_match:
+        parsed = _last_amount_in_text(label_match.group(1), min_value=10)
+        if parsed is not None:
+            return parsed
+
+    direct_match = re.search(r"(?:montant|total|ttc)\s*[:=]?\s*([0-9]+(?:[,.][0-9]+)?)", text, re.IGNORECASE)
+    if direct_match:
+        parsed = _parse_float(direct_match.group(1))
+        if parsed is not None and parsed != 16:
+            return parsed
     return None
 
 
 def _extract_amount_due(text: str) -> float | None:
+    label_match = re.search(r"(?:montant\s+(?:a|à)\s+payer)(.{0,100})", text, re.IGNORECASE)
+    if label_match:
+        parsed = _last_amount_in_text(label_match.group(1), min_value=50)
+        if parsed is not None:
+            return parsed
+    before_label_match = re.search(r"(.{0,100})(?:montant\s+(?:a|à)\s+payer)", text, re.IGNORECASE)
+    if before_label_match:
+        parsed = _last_amount_in_text(before_label_match.group(1), min_value=50)
+        if parsed is not None:
+            return parsed
+
     patterns = (
-        r"(?:montant\s+(?:a|à)\s+payer)\D{0,40}([0-9]+(?:[,.][0-9]+)?)",
-        r"([0-9]+(?:[,.][0-9]+)?)\D{0,20}(?:montant\s+(?:a|à)\s+payer)",
+        r"(?:montant\s+(?:a|à)\s+payer)\D{0,80}([0-9]+(?:[,.][0-9]+)?)",
+        r"([0-9]+(?:[,.][0-9]+)?)\D{0,80}(?:montant\s+(?:a|à)\s+payer)",
     )
     for pattern in patterns:
         match = re.search(pattern, text, re.IGNORECASE)
         if match:
             parsed = _parse_float(match.group(1))
-            if parsed is not None:
+            if parsed is not None and parsed >= 50:
                 return parsed
+
+    amounts = _amount_candidates(text, min_value=50)
+    return max(amounts) if amounts else None
+
+
+def _last_amount_in_text(text: str, min_value: float = 0) -> float | None:
+    amounts = _amount_candidates(text, min_value=min_value)
+    return amounts[-1] if amounts else None
+
+
+def _amount_candidates(text: str, min_value: float = 0) -> list[float]:
+    amounts: list[float] = []
+    for raw in re.findall(r"\b([0-9]+[,.][0-9]{2,3})\b", text):
+        parsed = _parse_float(raw)
+        if parsed is not None and min_value <= parsed <= 100000:
+            amounts.append(parsed)
+    return amounts
+
+
+def _extract_period(parsed_dates: list[date], prefer_earliest: bool = False) -> tuple[date, date] | None:
+    if len(parsed_dates) < 2:
+        return None
+    if prefer_earliest:
+        ordered = sorted(set(parsed_dates))
+        if len(ordered) >= 2:
+            return ordered[0], ordered[1]
+    for index, first_period in enumerate(parsed_dates):
+        second_period = next((candidate for candidate in parsed_dates[index + 1 :] if first_period < candidate), None)
+        if second_period:
+            return first_period, second_period
     return None
+
+
+def _extract_consumption_from_indexes(text: str) -> list[float]:
+    values: list[float] = []
+    integer_tokens = [int(match.group(1)) for match in re.finditer(r"\b([0-9]{4,6})\b", text)]
+    for previous, current in zip(integer_tokens, integer_tokens[1:], strict=False):
+        difference = previous - current
+        if 5 <= difference <= 50000 and difference not in values:
+            values.append(float(difference))
+    return values[:2]
 
 
 def _extract_after_keywords(text: str, keywords: tuple[str, ...], window: int = 120) -> float | None:
@@ -225,6 +285,31 @@ def _extract_after_keywords(text: str, keywords: tuple[str, ...], window: int = 
             if parsed is not None and parsed > 0:
                 return parsed
     return None
+
+
+def _estimate_extraction_confidence(fields: dict[str, Any], is_steg_bill: bool) -> int:
+    confidence = min(95, 45 + len(fields) * 10)
+    if not is_steg_bill:
+        return confidence
+
+    suspicious = False
+    amount_due = _parse_float(fields.get("amount_due"))
+    amount = _parse_float(fields.get("amount"))
+    quantity = _parse_float(fields.get("quantity"))
+    gas_quantity = _parse_float(fields.get("gas_quantity"))
+
+    if fields.get("provider") != "STEG":
+        suspicious = True
+    if amount_due is not None and amount_due < 50:
+        suspicious = True
+    if amount is not None and amount < 20:
+        suspicious = True
+    if quantity is not None and quantity < 20:
+        suspicious = True
+    if gas_quantity is not None and gas_quantity < 5:
+        suspicious = True
+
+    return min(confidence, 65) if suspicious else confidence
 
 
 def _parse_date(value: Any) -> date | None:

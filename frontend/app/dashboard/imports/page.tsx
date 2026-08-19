@@ -107,7 +107,7 @@ export default function ImportsPage() {
       <main className="mx-auto max-w-6xl px-4 py-8">
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
-            <p className="text-xs font-semibold uppercase text-emerald-700">Sprint 3</p>
+            <p className="text-xs font-semibold uppercase text-emerald-700">Collecte contrôlée</p>
             <h1 className="text-2xl font-bold text-slate-950">Collecte fichiers et traçabilité</h1>
             <p className="mt-1 text-sm text-slate-500">Prévisualisez un CSV/Excel, mappez les colonnes, puis intégrez les données au référentiel.</p>
           </div>

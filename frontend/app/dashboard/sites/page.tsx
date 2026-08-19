@@ -50,7 +50,7 @@ function SiteForm({
           required
           value={name}
           onChange={(e) => setName(e.target.value)}
-          placeholder="Usine de Lyon"
+          placeholder="Site industriel Tunis"
           className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
         />
       </div>
@@ -59,7 +59,7 @@ function SiteForm({
         <input
           value={code}
           onChange={(e) => setCode(e.target.value)}
-          placeholder="LYN-01"
+          placeholder="TUN-01"
           className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
         />
       </div>
@@ -68,7 +68,7 @@ function SiteForm({
         <input
           value={location}
           onChange={(e) => setLocation(e.target.value)}
-          placeholder="Lyon, France"
+          placeholder="Tunis, Tunisie"
           className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
         />
       </div>

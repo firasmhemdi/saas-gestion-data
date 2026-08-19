@@ -89,6 +89,31 @@ def create_document(
     return document.to_dict(extraction.to_dict())
 
 
+@router.post("/{document_id}/reanalyze", response_model=DocumentOut)
+def reanalyze_document(
+    document_id: int,
+    request: Request,
+    current_user: User = Depends(require_roles(*_WRITERS)),
+    db: Session = Depends(get_db),
+):
+    document = _get_document(db, document_id, current_user)
+    fields, confidence = extract_document_fields(document.raw_text)
+    document.document_type = classify_document(document.raw_text, document.filename)
+    document.status = DocumentStatus.extracted
+    extraction = ExtractedData(
+        company_id=current_user.company_id,
+        document_id=document.id,
+        fields=fields,
+        confidence=confidence,
+    )
+    db.add(extraction)
+    db.commit()
+    db.refresh(document)
+    db.refresh(extraction)
+    _audit(db, request, current_user, AuditAction.document_extracted, {"document_id": document.id, "reanalyzed": True})
+    return document.to_dict(extraction.to_dict())
+
+
 @router.post("/{document_id}/validate", response_model=DocumentOut)
 def validate_document(
     document_id: int,

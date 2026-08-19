@@ -111,7 +111,7 @@ export default function QualityPage() {
       <main className="mx-auto max-w-6xl px-4 py-8">
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-teal-700">Sprint 6</p>
+            <p className="text-xs font-semibold uppercase tracking-wide text-teal-700">Gouvernance des données</p>
             <h1 className="text-2xl font-bold text-slate-950">Qualité et normalisation</h1>
             <p className="mt-1 text-sm text-slate-500">
               Contrôlez les valeurs manquantes, les unités, les doublons et les anomalies avant validation.

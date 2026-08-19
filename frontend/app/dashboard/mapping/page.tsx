@@ -115,7 +115,7 @@ export default function MappingPage() {
       <Navbar />
       <main className="mx-auto max-w-6xl px-4 py-8">
         <div>
-          <p className="text-xs font-semibold uppercase text-emerald-700">Sprint 4</p>
+          <p className="text-xs font-semibold uppercase text-emerald-700">Intégration des sources</p>
           <h1 className="text-2xl font-bold text-slate-950">ERP, data mapping et synchronisation</h1>
           <p className="mt-1 text-sm text-slate-500">Configurez les correspondances de champs, planifiez les synchronisations et lancez un test lecture seule.</p>
         </div>

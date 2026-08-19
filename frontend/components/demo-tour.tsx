@@ -3,12 +3,12 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
-const STORAGE_KEY = "sgd_demo_tour_completed";
+const STORAGE_KEY = "sgd_onboarding_tour_completed";
 
 const steps = [
   {
     title: "Collecter une donnée",
-    description: "Saisie, import ou document: montrez comment la donnée entre dans le système.",
+    description: "Saisie, import ou document : faites entrer une donnée fiable dans le système.",
     href: "/dashboard/entry",
   },
   {
@@ -23,7 +23,7 @@ const steps = [
   },
   {
     title: "Interroger l'assistant IA",
-    description: "Posez une question métier et montrez les sources utilisées dans la réponse.",
+    description: "Posez une question métier et vérifiez les sources utilisées dans la réponse.",
     href: "/dashboard/assistant",
   },
 ];
@@ -60,10 +60,10 @@ export function DemoTour() {
     <div className="app-surface rounded-lg p-5">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-wide text-teal-700">Mode présentation</p>
-          <h2 className="mt-1 text-lg font-semibold text-slate-950">Parcours de démonstration guidé</h2>
+          <p className="text-xs font-semibold uppercase tracking-wide text-teal-700">Prise en main</p>
+          <h2 className="mt-1 text-lg font-semibold text-slate-950">Parcours guidé</h2>
           <p className="mt-1 text-sm leading-6 text-slate-500">
-            Suivez ces étapes pour montrer une expérience complète, claire et convaincante.
+            Suivez ces étapes pour présenter un flux complet, clair et convaincant.
           </p>
         </div>
         <button
@@ -77,7 +77,7 @@ export function DemoTour() {
 
       <div className="mt-5">
         <div className="flex items-center justify-between text-xs font-semibold text-slate-500">
-          <span>Progression de la démo</span>
+          <span>Progression du parcours</span>
           <span>{progress}%</span>
         </div>
         <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-100">
