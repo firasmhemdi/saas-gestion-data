@@ -1,4 +1,5 @@
 import json
+import logging
 import smtplib
 from email.message import EmailMessage
 from urllib.error import HTTPError, URLError
@@ -12,8 +13,23 @@ class EmailDeliveryError(Exception):
     pass
 
 
+logger = logging.getLogger(__name__)
+
+
 def _sender_header(name: str, email: str) -> str:
     return f"{name} <{email}>"
+
+
+def _safe_resend_error_message(error_body: str) -> str:
+    body = error_body.lower()
+    if "domain" in body or "verify" in body or "own email address" in body:
+        return (
+            "Resend a refusé l'envoi. Vérifiez que RESEND_FROM_EMAIL utilise un domaine vérifié, "
+            "ou testez avec l'adresse e-mail autorisée par votre compte Resend."
+        )
+    if "api key" in body or "unauthorized" in body or "forbidden" in body:
+        return "Resend a refusé l'envoi. Vérifiez la variable RESEND_API_KEY sur Render."
+    return "Impossible d'envoyer l'e-mail OTP."
 
 
 def _send_with_resend(user: User, *, subject: str, text: str, html: str) -> None:
@@ -21,7 +37,7 @@ def _send_with_resend(user: User, *, subject: str, text: str, html: str) -> None
     if not settings.resend_api_key:
         raise EmailDeliveryError("Service e-mail API non configuré.")
 
-    from_email = settings.resend_from_email or settings.smtp_from_email
+    from_email = settings.resend_from_email or "onboarding@resend.dev"
     payload = {
         "from": _sender_header(settings.smtp_from_name, from_email),
         "to": [user.email],
@@ -44,8 +60,13 @@ def _send_with_resend(user: User, *, subject: str, text: str, html: str) -> None
         with urlopen(request, timeout=15) as response:
             if response.status >= 400:
                 raise EmailDeliveryError("Impossible d'envoyer l'e-mail OTP.")
-    except (HTTPError, URLError) as exc:
-        raise EmailDeliveryError("Impossible d'envoyer l'e-mail OTP.") from exc
+    except HTTPError as exc:
+        error_body = exc.read().decode("utf-8", errors="replace")
+        logger.warning("Resend rejected email delivery: status=%s body=%s", exc.code, error_body)
+        raise EmailDeliveryError(_safe_resend_error_message(error_body)) from exc
+    except URLError as exc:
+        logger.warning("Resend email delivery unavailable: %s", exc)
+        raise EmailDeliveryError("Impossible de contacter le service e-mail Resend.") from exc
 
 
 def _send_with_smtp(user: User, *, subject: str, text: str, html: str) -> None:

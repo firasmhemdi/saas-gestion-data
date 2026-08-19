@@ -1,6 +1,7 @@
 from fastapi.testclient import TestClient
 
 from app.core.config import get_settings
+from app.services.email import _safe_resend_error_message
 from tests.helpers import auth_headers, login, register
 
 
@@ -139,3 +140,10 @@ class TestOtpLogin:
             assert "e-mail" in resp.json()["detail"]
         finally:
             get_settings.cache_clear()
+
+
+class TestEmailDeliveryMessages:
+    def test_resend_domain_error_message_is_actionable(self):
+        message = _safe_resend_error_message("You can only send testing emails to your own email address. Verify a domain.")
+        assert "RESEND_FROM_EMAIL" in message
+        assert "domaine vérifié" in message
