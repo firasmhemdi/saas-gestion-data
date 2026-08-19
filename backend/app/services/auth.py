@@ -15,6 +15,7 @@ from app.core.security import (
     verify_password,
 )
 from app.models.audit_log import AuditAction
+from app.models.otp import OtpPurpose
 from app.models.company import Company
 from app.models.user import RefreshToken, Role, User
 from app.schemas.auth import RegisterRequest
@@ -210,6 +211,81 @@ def authenticate(
     db.refresh(user)
     return {"access_token": tokens["access_token"], "refresh_token": tokens["refresh_token"],
             "token_type": "bearer", "expires_in": tokens["expires_in"], "user": user}
+
+
+def request_password_reset(
+    db: Session,
+    email: str,
+    *,
+    ip_address: str | None = None,
+    user_agent: str | None = None,
+) -> dict:
+    normalized_email = email.lower()
+    user = db.scalar(select(User).where(User.email == normalized_email))
+    if not user or not user.is_active:
+        return {
+            "requires_password_reset": True,
+            "reset_token": None,
+            "delivery_hint": "Si un compte existe avec cet e-mail, un code de réinitialisation sera envoyé.",
+            "email": normalized_email,
+        }
+
+    from app.services import otp as otp_service
+
+    try:
+        challenge = otp_service.issue_password_reset(db, user)
+    except otp_service.OtpDeliveryError as exc:
+        raise OtpDeliveryUnavailableError(str(exc)) from exc
+
+    audit_service.log(
+        db,
+        AuditAction.otp_sent,
+        user_id=user.id,
+        company_id=user.company_id,
+        ip_address=ip_address,
+        user_agent=user_agent,
+        details={"email": normalized_email, "purpose": "password_reset"},
+    )
+    return challenge
+
+
+def reset_password(
+    db: Session,
+    reset_token: str,
+    code: str,
+    new_password: str,
+    *,
+    ip_address: str | None = None,
+    user_agent: str | None = None,
+) -> None:
+    from app.services import otp as otp_service
+
+    user = otp_service.verify_code(
+        db,
+        reset_token,
+        code,
+        purpose=OtpPurpose.password_reset,
+        token_type="password_reset",
+    )
+    user.password_hash = hash_password(new_password)
+
+    active_tokens = db.scalars(
+        select(RefreshToken).where(RefreshToken.user_id == user.id, RefreshToken.revoked_at.is_(None))
+    ).all()
+    now = datetime.now(timezone.utc)
+    for token in active_tokens:
+        token.revoked_at = now
+
+    audit_service.log(
+        db,
+        AuditAction.password_change,
+        user_id=user.id,
+        company_id=user.company_id,
+        ip_address=ip_address,
+        user_agent=user_agent,
+        details={"method": "password_reset"},
+    )
+    db.commit()
 
 
 def refresh(

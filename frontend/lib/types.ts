@@ -34,6 +34,13 @@ export interface EmailVerificationChallenge {
   email: string;
 }
 
+export interface PasswordResetChallenge {
+  requires_password_reset: boolean;
+  reset_token?: string | null;
+  delivery_hint?: string;
+  email?: string | null;
+}
+
 export type LoginResult = TokenResponse | OtpChallenge | EmailVerificationChallenge;
 export type RegisterResult = TokenResponse | EmailVerificationChallenge;
 

@@ -10,6 +10,7 @@ from app.core.database import Base
 class OtpPurpose(str, enum.Enum):
     login = "login"
     email_verification = "email_verification"
+    password_reset = "password_reset"
 
 
 class OtpCode(Base):

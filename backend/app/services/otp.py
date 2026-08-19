@@ -9,7 +9,7 @@ from app.core.config import get_settings
 from app.core.security import create_challenge_token, decode_token
 from app.models.otp import OtpCode, OtpPurpose
 from app.models.user import User
-from app.services.email import EmailDeliveryError, send_email_verification_code, send_otp_code
+from app.services.email import EmailDeliveryError, send_email_verification_code, send_otp_code, send_password_reset_code
 
 
 class OtpError(Exception):
@@ -60,6 +60,8 @@ def _issue_challenge(db: Session, user: User, *, purpose: OtpPurpose, token_type
         try:
             if purpose == OtpPurpose.email_verification:
                 send_email_verification_code(user, code, settings.otp_expire_minutes)
+            elif purpose == OtpPurpose.password_reset:
+                send_password_reset_code(user, code, settings.otp_expire_minutes)
             else:
                 send_otp_code(user, code, settings.otp_expire_minutes)
         except EmailDeliveryError as exc:
@@ -72,6 +74,13 @@ def _issue_challenge(db: Session, user: User, *, purpose: OtpPurpose, token_type
             "requires_email_verification": True,
             "verification_token": otp_token,
             "delivery_hint": "Un code de vérification a été envoyé à votre adresse e-mail.",
+            "email": user.email,
+        }
+    elif purpose == OtpPurpose.password_reset:
+        result = {
+            "requires_password_reset": True,
+            "reset_token": otp_token,
+            "delivery_hint": "Un code de réinitialisation a été envoyé à votre adresse e-mail.",
             "email": user.email,
         }
     else:
@@ -91,6 +100,10 @@ def issue_challenge(db: Session, user: User) -> dict:
 
 def issue_email_verification(db: Session, user: User) -> dict:
     return _issue_challenge(db, user, purpose=OtpPurpose.email_verification, token_type="email_verification")
+
+
+def issue_password_reset(db: Session, user: User) -> dict:
+    return _issue_challenge(db, user, purpose=OtpPurpose.password_reset, token_type="password_reset")
 
 
 def resend_challenge(db: Session, challenge_token: str, *, purpose: OtpPurpose, token_type: str) -> dict:

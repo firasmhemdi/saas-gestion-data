@@ -66,6 +66,28 @@ class EmailVerificationRequest(BaseModel):
     code: str = Field(min_length=4, max_length=8)
 
 
+class PasswordResetRequest(BaseModel):
+    email: EmailStr
+
+
+class PasswordResetChallenge(BaseModel):
+    requires_password_reset: bool = True
+    reset_token: str | None = None
+    delivery_hint: str | None = None
+    email: EmailStr | None = None
+    dev_otp: str | None = None
+
+
+class PasswordResetConfirmRequest(BaseModel):
+    reset_token: str
+    code: str = Field(min_length=4, max_length=8)
+    new_password: str = Field(min_length=8, max_length=128)
+
+
+class MessageResponse(BaseModel):
+    message: str
+
+
 class OtpSettingsRequest(BaseModel):
     enabled: bool
     password: str

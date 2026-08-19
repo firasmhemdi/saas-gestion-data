@@ -133,6 +133,49 @@ class TestLogin:
         assert resp.status_code == 401
 
 
+class TestPasswordReset:
+    def test_password_reset_changes_password(self, client: TestClient):
+        _register(client)
+
+        requested = client.post("/api/v1/auth/password/forgot", json={"email": "admin@acme.com"})
+        assert requested.status_code == 200, requested.text
+        challenge = requested.json()
+        assert challenge["requires_password_reset"] is True
+        assert challenge["reset_token"]
+        assert len(challenge["dev_otp"]) == 6
+
+        reset = client.post(
+            "/api/v1/auth/password/reset",
+            json={
+                "reset_token": challenge["reset_token"],
+                "code": challenge["dev_otp"],
+                "new_password": "NewStrongPass!456",
+            },
+        )
+        assert reset.status_code == 200, reset.text
+
+        old_login = client.post("/api/v1/auth/login", json={"email": "admin@acme.com", "password": "StrongPass!123"})
+        assert old_login.status_code == 401
+
+        new_login = client.post("/api/v1/auth/login", json={"email": "admin@acme.com", "password": "NewStrongPass!456"})
+        assert new_login.status_code == 200, new_login.text
+        assert new_login.json()["access_token"]
+
+    def test_password_reset_rejects_wrong_code(self, client: TestClient):
+        _register(client)
+        challenge = client.post("/api/v1/auth/password/forgot", json={"email": "admin@acme.com"}).json()
+
+        reset = client.post(
+            "/api/v1/auth/password/reset",
+            json={
+                "reset_token": challenge["reset_token"],
+                "code": "000000",
+                "new_password": "NewStrongPass!456",
+            },
+        )
+        assert reset.status_code == 400
+
+
 class TestMe:
     def test_me_returns_current_user(self, client: TestClient):
         data = _register(client)

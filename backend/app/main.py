@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 
 from app.api.routes import analytics, assistant, auth, data_sources, documents, environmental_data, imports, mappings, otp, quality, reference, sites, users
 from app.core.config import get_settings
@@ -10,8 +11,17 @@ from app.core.database import Base, engine
 settings = get_settings()
 
 
+def ensure_database_compatibility() -> None:
+    if engine.dialect.name != "postgresql":
+        return
+    with engine.begin() as connection:
+        connection.execute(text("ALTER TYPE otp_purpose ADD VALUE IF NOT EXISTS 'email_verification'"))
+        connection.execute(text("ALTER TYPE otp_purpose ADD VALUE IF NOT EXISTS 'password_reset'"))
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    ensure_database_compatibility()
     Base.metadata.create_all(bind=engine)
     yield
 

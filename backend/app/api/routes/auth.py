@@ -12,6 +12,9 @@ from app.schemas.auth import (
     UserOut,
     ChallengeResendRequest,
     EmailVerificationRequest,
+    MessageResponse,
+    PasswordResetConfirmRequest,
+    PasswordResetRequest,
 )
 from app.services import auth as auth_service
 
@@ -112,6 +115,36 @@ def resend_email_verification(payload: ChallengeResendRequest, db: Session = Dep
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
     except otp_service.OtpInvalidError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.post("/password/forgot")
+def forgot_password(payload: PasswordResetRequest, request: Request, db: Session = Depends(get_db)):
+    ip, ua = _client_context(request)
+    try:
+        return auth_service.request_password_reset(db, payload.email, ip_address=ip, user_agent=ua)
+    except auth_service.OtpDeliveryUnavailableError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+
+
+@router.post("/password/reset", response_model=MessageResponse)
+def reset_password(payload: PasswordResetConfirmRequest, request: Request, db: Session = Depends(get_db)):
+    ip, ua = _client_context(request)
+    from app.services import otp as otp_service
+
+    try:
+        auth_service.reset_password(
+            db,
+            payload.reset_token,
+            payload.code,
+            payload.new_password,
+            ip_address=ip,
+            user_agent=ua,
+        )
+    except otp_service.OtpExpiredError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+    except otp_service.OtpInvalidError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return MessageResponse(message="Mot de passe réinitialisé. Vous pouvez vous connecter.")
 
 
 @router.post("/refresh", response_model=TokenResponse)

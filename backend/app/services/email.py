@@ -213,3 +213,30 @@ def send_email_verification_code(user: User, code: str, expires_minutes: int) ->
         text=text,
         html=html,
     )
+
+
+def send_password_reset_code(user: User, code: str, expires_minutes: int) -> None:
+    text = (
+        f"Bonjour {user.full_name},\n\n"
+        f"Votre code de réinitialisation SaaS Gestion Data est : {code}\n"
+        f"Il expire dans {expires_minutes} minutes.\n\n"
+        "Si vous n'avez pas demandé ce changement, ignorez cet e-mail."
+    )
+    html = f"""
+    <div style="font-family:Arial,sans-serif;max-width:560px;margin:auto;color:#0f172a">
+      <h2 style="margin:0 0 12px">Réinitialisation du mot de passe</h2>
+      <p>Bonjour {user.full_name},</p>
+      <p>Utilisez ce code pour définir un nouveau mot de passe SaaS Gestion Data.</p>
+      <div style="font-size:28px;font-weight:700;letter-spacing:6px;background:#fef3c7;border-radius:12px;padding:18px;text-align:center;margin:20px 0;color:#92400e">
+        {code}
+      </div>
+      <p style="font-size:14px;color:#475569">Ce code expire dans {expires_minutes} minutes.</p>
+      <p style="font-size:13px;color:#64748b">Si vous n'avez pas demandé ce changement, ignorez cet e-mail.</p>
+    </div>
+    """
+    _send_code_email(
+        user,
+        subject="Réinitialisation de votre mot de passe SaaS Gestion Data",
+        text=text,
+        html=html,
+    )

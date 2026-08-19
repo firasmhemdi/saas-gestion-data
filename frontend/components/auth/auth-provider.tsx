@@ -3,7 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 
 import { api, clearAuth, getAccessToken, getRefreshToken, setAuth } from "@/lib/api";
-import type { LoginResult, RegisterPayload, RegisterResult, TokenResponse, User } from "@/lib/types";
+import type { LoginResult, PasswordResetChallenge, RegisterPayload, RegisterResult, TokenResponse, User } from "@/lib/types";
 
 interface AuthContextValue {
   user: User | null;
@@ -14,6 +14,8 @@ interface AuthContextValue {
   register: (payload: RegisterPayload) => Promise<RegisterResult>;
   verifyEmail: (verificationToken: string, code: string) => Promise<void>;
   resendEmailVerification: (verificationToken: string) => Promise<RegisterResult>;
+  requestPasswordReset: (email: string) => Promise<PasswordResetChallenge>;
+  confirmPasswordReset: (resetToken: string, code: string, newPassword: string) => Promise<{ message: string }>;
   logout: () => Promise<void>;
 }
 
@@ -101,6 +103,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return api.post<RegisterResult>("/auth/email/resend", { challenge_token: verificationToken });
   }, []);
 
+  const requestPasswordReset = useCallback(async (email: string) => {
+    return api.post<PasswordResetChallenge>("/auth/password/forgot", { email }, { auth: false });
+  }, []);
+
+  const confirmPasswordReset = useCallback(async (resetToken: string, code: string, newPassword: string) => {
+    return api.post<{ message: string }>(
+      "/auth/password/reset",
+      {
+        reset_token: resetToken,
+        code,
+        new_password: newPassword,
+      },
+      { auth: false },
+    );
+  }, []);
+
   const logout = useCallback(async () => {
     try {
       const refreshToken = getRefreshToken();
@@ -123,9 +141,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       register,
       verifyEmail,
       resendEmailVerification,
+      requestPasswordReset,
+      confirmPasswordReset,
       logout,
     }),
-    [user, loading, login, verifyOtp, resendOtp, register, verifyEmail, resendEmailVerification, logout],
+    [
+      user,
+      loading,
+      login,
+      verifyOtp,
+      resendOtp,
+      register,
+      verifyEmail,
+      resendEmailVerification,
+      requestPasswordReset,
+      confirmPasswordReset,
+      logout,
+    ],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
