@@ -1,7 +1,7 @@
 from fastapi.testclient import TestClient
 
 from app.core.config import get_settings
-from app.services.email import _safe_resend_error_message
+from app.services.email import _safe_mailjet_error_message, _safe_resend_error_message
 from tests.helpers import auth_headers, login, register
 
 
@@ -147,3 +147,8 @@ class TestEmailDeliveryMessages:
         message = _safe_resend_error_message("You can only send testing emails to your own email address. Verify a domain.")
         assert "RESEND_FROM_EMAIL" in message
         assert "domaine vérifié" in message
+
+    def test_mailjet_sender_error_message_is_actionable(self):
+        message = _safe_mailjet_error_message("The From address is not a validated sender.")
+        assert "MAILJET_FROM_EMAIL" in message
+        assert "Senders & Domains" in message

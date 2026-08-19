@@ -30,6 +30,10 @@ class Settings(BaseSettings):
     email_provider: str = "smtp"
     resend_api_key: str | None = None
     resend_from_email: str | None = None
+    mailjet_api_key: str | None = None
+    mailjet_secret_key: str | None = None
+    mailjet_from_email: str | None = None
+    mailjet_from_name: str | None = None
     smtp_host: str | None = None
     smtp_port: int = 587
     smtp_username: str | None = None

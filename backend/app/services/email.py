@@ -1,3 +1,4 @@
+import base64
 import json
 import logging
 import smtplib
@@ -30,6 +31,18 @@ def _safe_resend_error_message(error_body: str) -> str:
     if "api key" in body or "unauthorized" in body or "forbidden" in body:
         return "Resend a refusé l'envoi. Vérifiez la variable RESEND_API_KEY sur Render."
     return "Impossible d'envoyer l'e-mail OTP."
+
+
+def _safe_mailjet_error_message(error_body: str) -> str:
+    body = error_body.lower()
+    if "sender" in body or "from" in body or "prevalidated" in body or "allowed" in body:
+        return (
+            "Mailjet a refusé l'envoi. Vérifiez que MAILJET_FROM_EMAIL est une adresse expéditeur "
+            "validée dans Mailjet > Senders & Domains."
+        )
+    if "api key" in body or "unauthorized" in body or "forbidden" in body or "authentication" in body:
+        return "Mailjet a refusé l'envoi. Vérifiez MAILJET_API_KEY et MAILJET_SECRET_KEY sur Render."
+    return "Impossible d'envoyer l'e-mail OTP avec Mailjet."
 
 
 def _send_with_resend(user: User, *, subject: str, text: str, html: str) -> None:
@@ -69,6 +82,50 @@ def _send_with_resend(user: User, *, subject: str, text: str, html: str) -> None
         raise EmailDeliveryError("Impossible de contacter le service e-mail Resend.") from exc
 
 
+def _send_with_mailjet(user: User, *, subject: str, text: str, html: str) -> None:
+    settings = get_settings()
+    if not settings.mailjet_api_key or not settings.mailjet_secret_key:
+        raise EmailDeliveryError("Service e-mail Mailjet non configuré.")
+    if not settings.mailjet_from_email:
+        raise EmailDeliveryError("MAILJET_FROM_EMAIL doit contenir une adresse expéditeur validée dans Mailjet.")
+
+    sender_name = settings.mailjet_from_name or settings.smtp_from_name
+    payload = {
+        "Messages": [
+            {
+                "From": {"Email": settings.mailjet_from_email, "Name": sender_name},
+                "To": [{"Email": user.email, "Name": user.full_name}],
+                "Subject": subject,
+                "TextPart": text,
+                "HTMLPart": html,
+            }
+        ]
+    }
+    credentials = f"{settings.mailjet_api_key}:{settings.mailjet_secret_key}".encode("utf-8")
+    request = Request(
+        "https://api.mailjet.com/v3.1/send",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Basic {base64.b64encode(credentials).decode('ascii')}",
+            "Content-Type": "application/json",
+            "User-Agent": "saas-gestion-data/1.0",
+        },
+        method="POST",
+    )
+
+    try:
+        with urlopen(request, timeout=15) as response:
+            if response.status >= 400:
+                raise EmailDeliveryError("Impossible d'envoyer l'e-mail OTP avec Mailjet.")
+    except HTTPError as exc:
+        error_body = exc.read().decode("utf-8", errors="replace")
+        logger.warning("Mailjet rejected email delivery: status=%s body=%s", exc.code, error_body)
+        raise EmailDeliveryError(_safe_mailjet_error_message(error_body)) from exc
+    except URLError as exc:
+        logger.warning("Mailjet email delivery unavailable: %s", exc)
+        raise EmailDeliveryError("Impossible de contacter le service e-mail Mailjet.") from exc
+
+
 def _send_with_smtp(user: User, *, subject: str, text: str, html: str) -> None:
     settings = get_settings()
     if not settings.smtp_host:
@@ -94,8 +151,12 @@ def _send_with_smtp(user: User, *, subject: str, text: str, html: str) -> None:
 
 def _send_code_email(user: User, *, subject: str, text: str, html: str) -> None:
     settings = get_settings()
-    if settings.email_provider.lower() == "resend":
+    provider = settings.email_provider.lower()
+    if provider == "resend":
         _send_with_resend(user, subject=subject, text=text, html=html)
+        return
+    if provider == "mailjet":
+        _send_with_mailjet(user, subject=subject, text=text, html=html)
         return
     _send_with_smtp(user, subject=subject, text=text, html=html)
 
