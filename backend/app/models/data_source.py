@@ -9,6 +9,7 @@ from app.core.database import Base
 
 
 class SourceType(str, enum.Enum):
+    csv = "csv"
     excel = "excel"
     api = "api"
     sql = "sql"

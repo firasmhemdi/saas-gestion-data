@@ -15,6 +15,7 @@ class DataEntryStatus(str, enum.Enum):
 
 class DataEntrySource(str, enum.Enum):
     manuel = "manuel"
+    csv = "csv"
     excel = "excel"
     api = "api"
     sql = "sql"

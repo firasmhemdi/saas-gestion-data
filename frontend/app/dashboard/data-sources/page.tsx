@@ -11,7 +11,7 @@ import type { DataSource, DataSourcePayload, Site, SourceType } from "@/lib/type
 const isManager = (role: string | undefined) =>
   role === "admin" || role === "responsable_environnement";
 
-const SOURCE_TYPES: SourceType[] = ["excel", "api", "sql", "erp", "iot"];
+const SOURCE_TYPES: SourceType[] = ["csv", "excel", "api", "sql", "erp", "iot"];
 
 function parseConfig(raw: string): Record<string, unknown> {
   if (!raw.trim()) return {};
@@ -32,7 +32,7 @@ function DataSourceForm({
   source?: DataSource;
 }) {
   const [name, setName] = useState(source?.name ?? "");
-  const [sourceType, setSourceType] = useState<SourceType>(source?.source_type ?? "excel");
+  const [sourceType, setSourceType] = useState<SourceType>(source?.source_type ?? "csv");
   const [siteId, setSiteId] = useState<string>(source?.site_id ? String(source.site_id) : "");
   const [config, setConfig] = useState(
     source ? JSON.stringify(source.config ?? {}, null, 2) : "{\n  \n}",
@@ -58,7 +58,7 @@ function DataSourceForm({
       setName("");
       setConfig("{\n  \n}");
       setSiteId("");
-      setSourceType("excel");
+      setSourceType("csv");
       await onDone();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Une erreur est survenue.");
@@ -205,7 +205,7 @@ export default function DataSourcesPage() {
           {canManage ? (
             <button
               type="button"
-              onClick={() => setEditing(editing ? null : { id: 0, company_id: 0, site_id: null, name: "", source_type: "excel", config: {}, is_active: true, created_at: "", updated_at: "" })}
+              onClick={() => setEditing(editing ? null : { id: 0, company_id: 0, site_id: null, name: "", source_type: "csv", config: {}, is_active: true, created_at: "", updated_at: "" })}
               className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700"
             >
               {editing ? "Annuler" : "Ajouter une source"}

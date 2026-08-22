@@ -17,6 +17,8 @@ def ensure_database_compatibility() -> None:
     with engine.begin() as connection:
         connection.execute(text("ALTER TYPE otp_purpose ADD VALUE IF NOT EXISTS 'email_verification'"))
         connection.execute(text("ALTER TYPE otp_purpose ADD VALUE IF NOT EXISTS 'password_reset'"))
+        connection.execute(text("ALTER TYPE source_type ADD VALUE IF NOT EXISTS 'csv'"))
+        connection.execute(text("ALTER TYPE data_entry_source ADD VALUE IF NOT EXISTS 'csv'"))
 
 
 @asynccontextmanager

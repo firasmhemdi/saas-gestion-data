@@ -51,7 +51,8 @@ export const AUDIT_ACTION_LABELS: Record<AuditAction, string> = {
 };
 
 export const SOURCE_TYPE_LABELS: Record<SourceType, string> = {
-  excel: "Fichier Excel/CSV",
+  csv: "Fichier CSV",
+  excel: "Fichier Excel",
   api: "API",
   sql: "Base SQL",
   erp: "ERP",

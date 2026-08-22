@@ -99,6 +99,8 @@ def update_data_source(
         source.site_id = payload.site_id
     if payload.name is not None:
         source.name = payload.name.strip()
+    if payload.source_type is not None:
+        source.source_type = payload.source_type
     if payload.config is not None:
         source.encrypted_config = encrypt(json.dumps(payload.config, ensure_ascii=False))
     if payload.is_active is not None:

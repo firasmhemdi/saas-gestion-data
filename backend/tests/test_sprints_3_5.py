@@ -20,18 +20,25 @@ class TestSprints3To5:
     def test_csv_preview_and_commit_creates_environmental_data(self, client: TestClient):
         admin = self._admin(client)
         indicator_id = self._indicator(client, admin["access_token"])
+        source = client.post(
+            "/api/v1/data-sources",
+            json={"name": "CSV énergie", "source_type": "csv", "config": {"delimiter": ";"}},
+            headers=auth_headers(admin["access_token"]),
+        ).json()
 
         preview = client.post(
             "/api/v1/imports/preview",
             json={
                 "filename": "energie.csv",
                 "content": "date;valeur;unite\n2026-01-15;1234.5;kWh\n2026-01-16;980;kWh",
+                "source_id": source["id"],
             },
             headers=auth_headers(admin["access_token"]),
         )
         assert preview.status_code == 201, preview.text
         job = preview.json()
         assert job["row_count"] == 2
+        assert job["source_type"] == "csv"
         assert job["mapping"]["entry_date"] == "date"
         assert job["mapping"]["value"] == "valeur"
 
@@ -47,6 +54,7 @@ class TestSprints3To5:
         entries = client.get("/api/v1/data", headers=auth_headers(admin["access_token"])).json()
         assert len(entries) == 2
         assert entries[0]["unit"] == "kWh"
+        assert entries[0]["source"] == "csv"
 
     def test_mapping_schedule_and_sync_are_traced(self, client: TestClient):
         admin = self._admin(client)

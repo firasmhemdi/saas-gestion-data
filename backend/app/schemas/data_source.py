@@ -16,6 +16,7 @@ class DataSourceCreateRequest(BaseModel):
 
 class DataSourceUpdateRequest(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=255)
+    source_type: SourceType | None = None
     site_id: int | None = None
     config: dict[str, Any] | None = None
     is_active: bool | None = None

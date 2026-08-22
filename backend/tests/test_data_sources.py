@@ -30,6 +30,20 @@ class TestDataSources:
         assert source["config"] == {"base_url": "https://api.edf.fr", "api_key": "secret-key-1234"}
         assert "secret-key-1234" not in source["encrypted_config"] if "encrypted_config" in source else True
 
+    def test_create_csv_source(self, client: TestClient):
+        admin = self._admin(client)
+        resp = client.post(
+            "/api/v1/data-sources",
+            json={
+                "name": "Fichier CSV STEG",
+                "source_type": "csv",
+                "config": {"delimiter": ";", "encoding": "utf-8"},
+            },
+            headers=auth_headers(admin["access_token"]),
+        )
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["source_type"] == "csv"
+
     def test_config_not_stored_in_clear_in_db(self, client: TestClient):
         admin = self._admin(client)
         client.post(
@@ -59,11 +73,12 @@ class TestDataSources:
 
         updated = client.patch(
             f"/api/v1/data-sources/{source['id']}",
-            json={"is_active": False, "config": {"api_key": "k2"}},
+            json={"is_active": False, "source_type": "csv", "config": {"api_key": "k2"}},
             headers=auth_headers(admin["access_token"]),
         )
         assert updated.status_code == 200
         assert updated.json()["is_active"] is False
+        assert updated.json()["source_type"] == "csv"
         assert updated.json()["config"] == {"api_key": "k2"}
 
         test_resp = client.post(

@@ -104,9 +104,9 @@ export interface AuditLog {
   created_at: string;
 }
 
-export type SourceType = "excel" | "api" | "sql" | "erp" | "iot";
+export type SourceType = "csv" | "excel" | "api" | "sql" | "erp" | "iot";
 export type IndicatorCategory = "energie" | "eau" | "dechets" | "emissions" | "matieres";
-export type DataEntrySource = "manuel" | "excel" | "api" | "sql" | "erp" | "iot";
+export type DataEntrySource = "manuel" | "csv" | "excel" | "api" | "sql" | "erp" | "iot";
 export type DataEntryStatus = "brouillon" | "valide";
 
 export interface Site {
