@@ -226,6 +226,7 @@ def _parse_float(value: Any) -> float | None:
     if value is None:
         return None
     raw = _normalize_digits(str(value)).strip().replace("\u00a0", " ").replace(" ", "")
+    raw = raw.replace("٫", ".").replace("٬", ".").replace(":", ".")
     raw = raw.replace("O", "0").replace("o", "0")
     try:
         return float(raw.replace(",", "."))
@@ -357,7 +358,7 @@ def _first_amount_in_text(text: str, min_value: float = 0) -> float | None:
 
 def _amount_candidates(text: str, min_value: float = 0) -> list[float]:
     amounts: list[float] = []
-    for raw in re.findall(r"\b([0-9]+[,.][0-9]{2,3})\b", text):
+    for raw in re.findall(r"\b([0-9]+[,.٫٬:][0-9]{2,3})\b", text):
         parsed = _parse_float(raw)
         if parsed is not None and min_value <= parsed <= 100000:
             amounts.append(parsed)
@@ -515,35 +516,45 @@ def _extract_generic_invoice_fields(line_text: str, normalized: str, searchable:
 def _extract_water_quantity(line_text: str, normalized: str) -> float | None:
     explicit = _extract_explicit_quantity_with_unit(normalized, units=("m3", "m³", "م3", "م³"))
     index_values = _extract_consumption_from_indexes(line_text, max_difference=2000)
-    cloud_quantity = _best_water_quantity_from_number_cloud(normalized)
-    if explicit is not None and (explicit[0] >= 5 or not index_values and cloud_quantity is None):
+    repeated_quantity = _best_water_quantity_from_number_cloud(normalized, repeated_only=True)
+    fallback_quantity = _best_water_quantity_from_number_cloud(normalized)
+    if explicit is not None and (explicit[0] >= 5 or not index_values and fallback_quantity is None):
         return explicit[0]
 
-    labeled = re.search(r"(?:consommation|quantit[eé]|volume|استهلاك)\D{0,45}([0-9]+(?:[,.][0-9]+)?)", normalized, re.IGNORECASE)
+    labeled = re.search(r"(?:consommation|quantit[eé]|volume|استهلاك|الكمية|كمية)\D{0,45}([0-9]+(?:[,.٫٬:][0-9]+)?)(?![,.٫٬:])", normalized, re.IGNORECASE)
     if labeled:
-        parsed = _parse_float(labeled.group(1))
+        parsed = _parse_water_quantity_value(labeled.group(1))
         if parsed is not None and 1 <= parsed <= 2000:
             return parsed
 
     lines = [line for line in line_text.splitlines() if line.strip()]
     for index, line in enumerate(lines):
         searchable = _normalize_for_search(line)
-        if not any(keyword in searchable for keyword in ("consommation", "quantite", "volume", "eau", "الماء", "المياه", "استهلاك")):
+        if not any(keyword in searchable for keyword in ("consommation", "quantite", "volume", "eau", "الماء", "المياه", "استهلاك", "الكمية", "كمية")):
             continue
         nearby = " ".join(lines[max(0, index - 1) : index + 3])
-        labeled = re.search(r"(?:consommation|quantit[eé]|volume|استهلاك)\D{0,30}([0-9]+(?:[,.][0-9]+)?)", nearby, re.IGNORECASE)
+        labeled = re.search(r"(?:consommation|quantit[eé]|volume|استهلاك|الكمية|كمية)\D{0,30}([0-9]+(?:[,.٫٬:][0-9]+)?)(?![,.٫٬:])", nearby, re.IGNORECASE)
         if labeled:
-            parsed = _parse_float(labeled.group(1))
+            parsed = _parse_water_quantity_value(labeled.group(1))
             if parsed is not None and 1 <= parsed <= 2000:
                 return parsed
         integers = _small_integer_candidates(nearby)
         if integers:
             return integers[0]
 
+    if repeated_quantity is not None:
+        return repeated_quantity
+
     if index_values:
         return index_values[0]
 
-    return cloud_quantity
+    return fallback_quantity
+
+
+def _parse_water_quantity_value(raw: str) -> float | None:
+    if re.search(r"[,.٫٬:][0-9]{2,3}$", raw.strip()):
+        return None
+    return _parse_float(raw)
 
 
 def _extract_explicit_quantity_with_unit(text: str, units: tuple[str, ...] = ("kwh", "khw", "kw h", "m3", "m³", "م3", "م³", "t", "tonne", "tonnes", "l", "litre", "litres")) -> tuple[float, str] | None:
@@ -631,7 +642,7 @@ def _extract_water_amount_due(line_text: str, normalized: str) -> float | None:
 
 def _small_integer_candidates(text: str) -> list[float]:
     values: list[float] = []
-    for match in re.finditer(r"(?<![0-9,.])([0-9]{1,4})(?![0-9,.])", text):
+    for match in re.finditer(r"(?<![0-9,.٫٬:])([0-9]{1,4})(?![0-9,.٫٬:])", text):
         parsed = _parse_float(match.group(1))
         if parsed is None:
             continue
@@ -640,7 +651,7 @@ def _small_integer_candidates(text: str) -> list[float]:
     return values
 
 
-def _best_water_quantity_from_number_cloud(text: str) -> float | None:
+def _best_water_quantity_from_number_cloud(text: str, repeated_only: bool = False) -> float | None:
     numbers = [_parse_float(match.group(1)) for match in re.finditer(r"\b([0-9]{1,6}(?:[,.][0-9]+)?)\b", text)]
     clean_numbers = [value for value in numbers if value is not None]
     common_quantities = [
@@ -651,6 +662,8 @@ def _best_water_quantity_from_number_cloud(text: str) -> float | None:
     repeated = [value for value in common_quantities if common_quantities.count(value) > 1]
     if repeated:
         return repeated[0]
+    if repeated_only:
+        return None
     if common_quantities:
         return common_quantities[0]
     return None

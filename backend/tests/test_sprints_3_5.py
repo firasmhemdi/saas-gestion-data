@@ -282,6 +282,28 @@ class TestSprints3To5:
         assert fields["unit"] == "m3"
         assert confidence >= 65
 
+    def test_sonede_prefers_repeated_table_quantity_over_index_difference(self):
+        text = """
+        الشركة الوطنية لاستغلال وتوزيع المياه
+        كشف استهلاك الماء
+        71٫510 100
+        42495 17
+        44990 44855 135
+        الكمية 46
+        معلوم الماء 46
+        المبلغ المطلوب للاستخلاص
+        57٫100
+        """
+
+        fields, confidence = extract_document_fields(text, "facture-sonede.jpg")
+
+        assert fields["invoice_kind"] == "water"
+        assert fields["provider"] == "SONEDE"
+        assert fields["amount_due"] == 57.1
+        assert fields["quantity"] == 46
+        assert fields["unit"] == "m3"
+        assert confidence >= 65
+
     def test_telecom_invoice_extracts_provider_service_and_amount_without_energy_fields(self):
         text = """
         Ooredoo Tunisie
