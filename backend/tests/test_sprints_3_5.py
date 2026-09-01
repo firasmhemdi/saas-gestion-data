@@ -216,3 +216,24 @@ class TestSprints3To5:
         assert fields["gas_quantity"] == 52
         assert fields["gas_unit"] == "m3"
         assert confidence >= 85
+
+    def test_sonede_water_invoice_extracts_required_fields(self):
+        text = """
+        الشركة الوطنية لاستغلال وتوزيع المياه
+        SONEDE Facture eau
+        Ancien index 42495 Nouveau index 42541
+        consommation eau 46 م3
+        periode du 2026/01/17 au 2026/04/17
+        montant total 57.100
+        المبلغ المطلوب للدفع 57.100
+        """
+
+        fields, confidence = extract_document_fields(text, "facture-sonede.jpg")
+
+        assert fields["provider"] == "SONEDE"
+        assert fields["period_start"] == "2026-01-17"
+        assert fields["period_end"] == "2026-04-17"
+        assert fields["amount_due"] == 57.1
+        assert fields["quantity"] == 46
+        assert fields["unit"] == "m3"
+        assert confidence >= 75

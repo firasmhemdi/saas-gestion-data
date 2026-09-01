@@ -100,12 +100,13 @@ def classify_document(text: str, filename: str = "") -> DocumentType:
     return DocumentType.autre
 
 
-def extract_document_fields(text: str) -> tuple[dict[str, Any], int]:
+def extract_document_fields(text: str, filename: str = "") -> tuple[dict[str, Any], int]:
     line_text = _normalize_ocr_text(text)
     normalized = " ".join(line_text.split())
-    searchable = _normalize_for_search(normalized)
+    searchable = _normalize_for_search(f"{filename} {normalized}")
     fields: dict[str, Any] = {}
     is_steg_bill = any(keyword in searchable for keyword in ("steg", "societe tunisienne", "electricite et du gaz", "montant a payer", "facture sur releve"))
+    is_water_bill = _is_water_bill(searchable)
 
     dates = re.findall(r"(\d{4}[-/.]\d{2}[-/.]\d{2}|\d{2}[-/.]\d{2}[-/.]\d{4})", normalized)
     if dates:
@@ -120,6 +121,8 @@ def extract_document_fields(text: str) -> tuple[dict[str, Any], int]:
 
     if is_steg_bill:
         fields["provider"] = "STEG"
+    elif is_water_bill:
+        fields["provider"] = "SONEDE"
 
     provider = _extract_provider(normalized, searchable)
     if provider:
@@ -180,7 +183,16 @@ def extract_document_fields(text: str) -> tuple[dict[str, Any], int]:
         for key, value in line_fields.items():
             fields.setdefault(key, value)
 
-    confidence = _estimate_extraction_confidence(fields, is_steg_bill)
+    if is_water_bill:
+        line_fields = _extract_water_invoice_fields(line_text, normalized)
+        for key, value in line_fields.items():
+            fields.setdefault(key, value)
+
+    generic_fields = _extract_generic_invoice_fields(line_text, normalized, searchable)
+    for key, value in generic_fields.items():
+        fields.setdefault(key, value)
+
+    confidence = _estimate_extraction_confidence(fields, is_steg_bill, is_water_bill)
     return fields, confidence
 
 
@@ -224,7 +236,7 @@ def _normalize_unit(value: str) -> str:
     normalized = _normalize_for_search(value).replace(" ", "").replace("³", "3")
     if normalized in {"kwh", "khw"} or normalized.startswith("kw"):
         return "kWh"
-    if normalized in {"m3", "m"}:
+    if normalized in {"m3", "m"} or normalized.startswith("م"):
         return "m3"
     return value.strip()
 
@@ -236,6 +248,22 @@ def _extract_provider(text: str, searchable: str) -> str | None:
         return "SONEDE"
     supplier_match = re.search(r"(?:fournisseur|supplier|prestataire)\s*[:=]\s*([A-Za-z0-9 &.'-]{2,80})", text, re.IGNORECASE)
     return supplier_match.group(1).strip() if supplier_match else None
+
+
+def _is_water_bill(searchable: str) -> bool:
+    return any(
+        keyword in searchable
+        for keyword in (
+            "sonede",
+            "eau",
+            "eaux",
+            "water",
+            "consommation eau",
+            "الماء",
+            "المياه",
+            "استغلال وتوزيع المياه",
+        )
+    )
 
 
 def _extract_total_amount(text: str) -> float | None:
@@ -374,14 +402,143 @@ def _best_steg_quantity_near_line(text: str) -> float | None:
     return integer_candidates[0] if integer_candidates else None
 
 
-def _extract_consumption_from_indexes(text: str) -> list[float]:
+def _extract_water_invoice_fields(line_text: str, normalized: str) -> dict[str, Any]:
+    fields: dict[str, Any] = {"provider": "SONEDE"}
+
+    quantity = _extract_water_quantity(line_text, normalized)
+    if quantity is not None:
+        fields["quantity"] = quantity
+        fields["unit"] = "m3"
+
+    due = _extract_amount_due_from_lines(line_text)
+    if due is not None:
+        fields["amount_due"] = due
+
+    amount = _extract_total_amount(normalized)
+    if amount is not None:
+        fields["amount"] = amount
+
+    return fields
+
+
+def _extract_generic_invoice_fields(line_text: str, normalized: str, searchable: str) -> dict[str, Any]:
+    fields: dict[str, Any] = {}
+    provider = _extract_provider(normalized, searchable)
+    if provider:
+        fields["provider"] = provider
+
+    due = _extract_amount_due_from_lines(line_text)
+    if due is not None:
+        fields["amount_due"] = due
+    elif "facture" in searchable or "invoice" in searchable:
+        amounts = _amount_candidates(normalized, min_value=1)
+        if amounts:
+            fields["amount_due"] = max(amounts)
+
+    amount = _extract_total_amount(normalized)
+    if amount is not None:
+        fields["amount"] = amount
+
+    quantity = _extract_explicit_quantity_with_unit(normalized)
+    if quantity is not None:
+        fields["quantity"] = quantity[0]
+        fields["unit"] = quantity[1]
+
+    return fields
+
+
+def _extract_water_quantity(line_text: str, normalized: str) -> float | None:
+    explicit = _extract_explicit_quantity_with_unit(normalized, units=("m3", "m³", "م3", "م³"))
+    if explicit is not None:
+        return explicit[0]
+
+    lines = [line for line in line_text.splitlines() if line.strip()]
+    for index, line in enumerate(lines):
+        searchable = _normalize_for_search(line)
+        if not any(keyword in searchable for keyword in ("consommation", "quantite", "volume", "eau", "الماء", "المياه", "استهلاك")):
+            continue
+        nearby = " ".join(lines[max(0, index - 1) : index + 3])
+        labeled = re.search(r"(?:consommation|quantit[eé]|volume|استهلاك)\D{0,30}([0-9]+(?:[,.][0-9]+)?)", nearby, re.IGNORECASE)
+        if labeled:
+            parsed = _parse_float(labeled.group(1))
+            if parsed is not None and 1 <= parsed <= 2000:
+                return parsed
+        integers = _small_integer_candidates(nearby)
+        if integers:
+            return integers[0]
+
+    index_values = _extract_consumption_from_indexes(normalized, max_difference=2000)
+    return index_values[0] if index_values else None
+
+
+def _extract_explicit_quantity_with_unit(text: str, units: tuple[str, ...] = ("kwh", "khw", "kw h", "m3", "m³", "م3", "م³", "t", "tonne", "tonnes", "l", "litre", "litres")) -> tuple[float, str] | None:
+    unit_pattern = "|".join(re.escape(unit) for unit in units)
+    patterns = (
+        rf"([0-9]+(?:[,.][0-9]+)?)\s*(?:{unit_pattern})",
+        rf"(?:{unit_pattern})\s*([0-9]+(?:[,.][0-9]+)?)",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if not match:
+            continue
+        parsed = _parse_float(match.group(1))
+        if parsed is None or parsed <= 0:
+            continue
+        unit_match = re.search(unit_pattern, match.group(0), re.IGNORECASE)
+        unit = _normalize_unit(unit_match.group(0)) if unit_match else ""
+        return parsed, unit
+    return None
+
+
+def _extract_amount_due_from_lines(line_text: str) -> float | None:
+    lines = [line for line in line_text.splitlines() if line.strip()]
+    payment_keywords = (
+        "montant a payer",
+        "montant à payer",
+        "net a payer",
+        "net à payer",
+        "total a payer",
+        "total à payer",
+        "a payer",
+        "à payer",
+        "payer",
+        "المبلغ",
+        "المعلوم",
+        "الدفع",
+        "المجموع",
+    )
+    total_keywords = ("montant total", "total ttc", "total", "ttc", "montant")
+    for keywords in (payment_keywords, total_keywords):
+        for index, line in enumerate(lines):
+            searchable = _normalize_for_search(line)
+            if not any(keyword in searchable for keyword in keywords):
+                continue
+            nearby = " ".join(lines[max(0, index - 1) : index + 2])
+            amounts = _amount_candidates(nearby, min_value=1)
+            if amounts:
+                return amounts[-1]
+    return None
+
+
+def _small_integer_candidates(text: str) -> list[float]:
+    values: list[float] = []
+    for match in re.finditer(r"\b([0-9]{1,4})\b", text):
+        parsed = _parse_float(match.group(1))
+        if parsed is None:
+            continue
+        if 1 <= parsed <= 2000 and parsed not in {4, 5, 7, 12, 16, 17, 18, 19, 20} and parsed not in values:
+            values.append(parsed)
+    return values
+
+
+def _extract_consumption_from_indexes(text: str, max_difference: int = 50000) -> list[float]:
     values: list[float] = []
     without_dates = re.sub(r"\b\d{4}[-/.]\d{2}[-/.]\d{2}\b", " ", text)
     without_dates = re.sub(r"\b\d{2}[-/.]\d{2}[-/.]\d{4}\b", " ", without_dates)
     integer_tokens = [int(match.group(1)) for match in re.finditer(r"\b([0-9]{4,6})\b", without_dates)]
     for previous, current in zip(integer_tokens, integer_tokens[1:], strict=False):
         difference = previous - current
-        if 5 <= difference <= 50000 and difference not in values:
+        if 5 <= difference <= max_difference and difference not in values:
             values.append(float(difference))
     return values[:2]
 
@@ -443,9 +600,9 @@ def _extract_after_keywords(text: str, keywords: tuple[str, ...], window: int = 
     return None
 
 
-def _estimate_extraction_confidence(fields: dict[str, Any], is_steg_bill: bool) -> int:
+def _estimate_extraction_confidence(fields: dict[str, Any], is_steg_bill: bool, is_water_bill: bool = False) -> int:
     confidence = min(95, 45 + len(fields) * 10)
-    if not is_steg_bill:
+    if not is_steg_bill and not is_water_bill:
         return confidence
 
     suspicious = False
@@ -454,7 +611,8 @@ def _estimate_extraction_confidence(fields: dict[str, Any], is_steg_bill: bool) 
     quantity = _parse_float(fields.get("quantity"))
     gas_quantity = _parse_float(fields.get("gas_quantity"))
 
-    if fields.get("provider") != "STEG":
+    expected_provider = "STEG" if is_steg_bill else "SONEDE"
+    if fields.get("provider") != expected_provider:
         suspicious = True
     if amount_due is not None and amount_due < 50:
         suspicious = True

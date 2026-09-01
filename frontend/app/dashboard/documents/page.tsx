@@ -76,6 +76,10 @@ function ocrTextScore(value: string) {
   return value.length + meaningfulWords * 12 + numbers * 8;
 }
 
+function formatAmount(value: string | undefined) {
+  return value ? `${value} TND` : "--";
+}
+
 export default function DocumentsPage() {
   const [documents, setDocuments] = useState<DocumentRecord[]>([]);
   const [sites, setSites] = useState<Site[]>([]);
@@ -142,6 +146,19 @@ export default function DocumentsPage() {
   const validationReady = missingRequired.length === 0;
   const selectedIndicator = indicators.find((indicator) => String(indicator.id) === indicatorId);
   const currentSite = sites.find((site) => String(site.id) === siteId);
+  const primaryUnit = normalizeUnit(fields.unit ?? "");
+  const isWaterDocument = fields.provider?.toLowerCase().includes("sonede") || (primaryUnit === "m3" && !fields.gas_quantity);
+  const summaryCards = isWaterDocument
+    ? [
+        ["Eau", fields.quantity ? `${fields.quantity} ${fields.unit || "m3"}`.trim() : "--"],
+        ["Fournisseur", fields.provider || "--"],
+        ["À payer", formatAmount(fields.amount_due || fields.amount)],
+      ]
+    : [
+        ["Électricité", fields.quantity ? `${fields.quantity} ${fields.unit || ""}`.trim() : "--"],
+        ["Gaz", fields.gas_quantity ? `${fields.gas_quantity} ${fields.gas_unit || ""}`.trim() : "--"],
+        ["À payer", formatAmount(fields.amount_due || fields.amount)],
+      ];
 
   function resetDocumentForm() {
     if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
@@ -457,11 +474,7 @@ export default function DocumentsPage() {
                 </div>
 
                 <div className="mt-4 grid gap-2 sm:grid-cols-3">
-                  {[
-                    ["Électricité", fields.quantity ? `${fields.quantity} ${fields.unit || ""}`.trim() : "--"],
-                    ["Gaz", fields.gas_quantity ? `${fields.gas_quantity} ${fields.gas_unit || ""}`.trim() : "--"],
-                    ["À payer", fields.amount_due ? `${fields.amount_due} TND` : fields.amount ? `${fields.amount} TND` : "--"],
-                  ].map(([label, value]) => (
+                  {summaryCards.map(([label, value]) => (
                     <div key={label} className="rounded-lg border border-slate-200 bg-white p-3">
                       <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">{label}</p>
                       <p className="mt-1 text-lg font-bold text-slate-950">{value}</p>

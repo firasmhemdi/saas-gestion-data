@@ -63,7 +63,7 @@ def create_document(
 ):
     _check_site(db, payload.site_id, current_user)
     document_type = classify_document(payload.raw_text, payload.filename)
-    fields, confidence = extract_document_fields(payload.raw_text)
+    fields, confidence = extract_document_fields(payload.raw_text, payload.filename)
     document = Document(
         company_id=current_user.company_id,
         site_id=payload.site_id,
@@ -97,7 +97,7 @@ def reanalyze_document(
     db: Session = Depends(get_db),
 ):
     document = _get_document(db, document_id, current_user)
-    fields, confidence = extract_document_fields(document.raw_text)
+    fields, confidence = extract_document_fields(document.raw_text, document.filename)
     document.document_type = classify_document(document.raw_text, document.filename)
     document.status = DocumentStatus.extracted
     extraction = ExtractedData(
