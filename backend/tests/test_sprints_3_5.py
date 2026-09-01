@@ -304,6 +304,26 @@ class TestSprints3To5:
         assert fields["unit"] == "m3"
         assert confidence >= 65
 
+    def test_sonede_does_not_invent_quantity_from_ambiguous_indexes(self):
+        text = """
+        الشركة الوطنية لاستغلال وتوزيع المياه
+        SONEDE
+        كشف استهلاك الماء
+        71 510 100
+        44990 44855 135
+        المبلغ المطلوب للاستخلاص
+        57 100
+        """
+
+        fields, confidence = extract_document_fields(text, "facture-sonede.jpg")
+
+        assert fields["invoice_kind"] == "water"
+        assert fields["provider"] == "SONEDE"
+        assert fields["amount_due"] == 57.1
+        assert "quantity" not in fields
+        assert "unit" not in fields
+        assert confidence >= 55
+
     def test_telecom_invoice_extracts_provider_service_and_amount_without_energy_fields(self):
         text = """
         Ooredoo Tunisie
