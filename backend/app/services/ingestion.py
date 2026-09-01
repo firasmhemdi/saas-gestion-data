@@ -362,7 +362,7 @@ def _amount_candidates(text: str, min_value: float = 0) -> list[float]:
         parsed = _parse_float(raw)
         if parsed is not None and min_value <= parsed <= 100000:
             amounts.append(parsed)
-    for match in re.finditer(r"(?<![0-9,.])([0-9]{1,3})[ \t]+([0-9]{3})(?![0-9,.])", text):
+    for match in re.finditer(r"(?<![0-9,.٫٬:])([0-9]{1,3})[ \t]+([0-9]{3})(?![0-9,.٫٬:])", text):
         parsed = _parse_float(f"{match.group(1)}.{match.group(2)}")
         if parsed is not None and min_value <= parsed <= 100000 and parsed not in amounts:
             amounts.append(parsed)
@@ -546,8 +546,8 @@ def _parse_water_quantity_value(raw: str) -> float | None:
 def _extract_explicit_quantity_with_unit(text: str, units: tuple[str, ...] = ("kwh", "khw", "kw h", "m3", "m³", "م3", "م³", "t", "tonne", "tonnes", "l", "litre", "litres")) -> tuple[float, str] | None:
     unit_pattern = "|".join(re.escape(unit) for unit in units)
     patterns = (
-        rf"([0-9]+(?:[,.][0-9]+)?)\s*(?:{unit_pattern})",
-        rf"(?:{unit_pattern})\s*([0-9]+(?:[,.][0-9]+)?)",
+        rf"([0-9]+(?:[,.٫٬:][0-9]+)?)\s*(?:{unit_pattern})",
+        rf"(?:{unit_pattern})\s*([0-9]+(?:[,.٫٬:][0-9]+)?)",
     )
     for pattern in patterns:
         match = re.search(pattern, text, re.IGNORECASE)
@@ -638,7 +638,7 @@ def _small_integer_candidates(text: str) -> list[float]:
 
 
 def _best_water_quantity_from_number_cloud(text: str, repeated_only: bool = False) -> float | None:
-    numbers = [_parse_float(match.group(1)) for match in re.finditer(r"\b([0-9]{1,6}(?:[,.][0-9]+)?)\b", text)]
+    numbers = [_parse_float(match.group(1)) for match in re.finditer(r"(?<![0-9])([0-9]{1,6}(?:[,.٫٬:][0-9]+)?)(?![0-9])", text)]
     clean_numbers = [value for value in numbers if value is not None]
     common_quantities = [
         value

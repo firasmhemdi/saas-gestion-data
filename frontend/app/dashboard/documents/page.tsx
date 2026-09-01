@@ -73,27 +73,38 @@ function normalizeUnit(value: string) {
   return value.trim().toLowerCase().replace("³", "3");
 }
 
-async function preprocessImageForOcr(file: File): Promise<Blob | File> {
+type CropRegion = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+async function preprocessImageForOcr(file: Blob, crop?: CropRegion): Promise<Blob | File> {
   try {
     const bitmap = await createImageBitmap(file);
+    const sourceX = Math.round((crop?.x ?? 0) * bitmap.width);
+    const sourceY = Math.round((crop?.y ?? 0) * bitmap.height);
+    const sourceWidth = Math.round((crop?.width ?? 1) * bitmap.width);
+    const sourceHeight = Math.round((crop?.height ?? 1) * bitmap.height);
     const maxSide = 2200;
-    const scale = Math.min(3, Math.max(1, maxSide / Math.max(bitmap.width, bitmap.height)));
+    const scale = Math.min(3.5, Math.max(1.4, maxSide / Math.max(sourceWidth, sourceHeight)));
     const canvas = document.createElement("canvas");
-    canvas.width = Math.round(bitmap.width * scale);
-    canvas.height = Math.round(bitmap.height * scale);
+    canvas.width = Math.round(sourceWidth * scale);
+    canvas.height = Math.round(sourceHeight * scale);
     const context = canvas.getContext("2d", { willReadFrequently: true });
     if (!context) return file;
 
     context.imageSmoothingEnabled = true;
     context.imageSmoothingQuality = "high";
-    context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    context.drawImage(bitmap, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height);
 
     const image = context.getImageData(0, 0, canvas.width, canvas.height);
     const data = image.data;
     for (let index = 0; index < data.length; index += 4) {
       const gray = data[index] * 0.299 + data[index + 1] * 0.587 + data[index + 2] * 0.114;
-      const contrasted = Math.max(0, Math.min(255, (gray - 128) * 1.45 + 128));
-      const cleaned = contrasted > 218 ? 255 : contrasted < 58 ? 0 : contrasted;
+      const contrasted = Math.max(0, Math.min(255, (gray - 128) * 1.65 + 128));
+      const cleaned = contrasted > 224 ? 255 : contrasted < 68 ? 0 : contrasted;
       data[index] = cleaned;
       data[index + 1] = cleaned;
       data[index + 2] = cleaned;
@@ -106,6 +117,19 @@ async function preprocessImageForOcr(file: File): Promise<Blob | File> {
   } catch {
     return file;
   }
+}
+
+function joinOcrPasses(parts: string[]) {
+  const seen = new Set<string>();
+  return parts
+    .flatMap((part) => part.split(/\r?\n/))
+    .map((line) => line.trim())
+    .filter((line) => {
+      if (!line || seen.has(line)) return false;
+      seen.add(line);
+      return true;
+    })
+    .join("\n");
 }
 
 function ocrTextScore(value: string) {
@@ -297,16 +321,31 @@ export default function DocumentsPage() {
         tessedit_pageseg_mode: PSM.SPARSE_TEXT,
       });
 
+      const ocrPasses: string[] = [];
       const preparedImage = await preprocessImageForOcr(fileToExtract);
       const preparedResult = await activeWorker.recognize(preparedImage);
-      let extractedText = (preparedResult.data.text ?? "").trim();
-      if (ocrTextScore(extractedText) < 250) {
+      ocrPasses.push((preparedResult.data.text ?? "").trim());
+
+      let extractedText = joinOcrPasses(ocrPasses);
+      if (ocrTextScore(extractedText) < 350) {
         const originalResult = await activeWorker.recognize(fileToExtract);
         const originalText = (originalResult.data.text ?? "").trim();
-        if (ocrTextScore(originalText) > ocrTextScore(extractedText)) {
-          extractedText = originalText;
-        }
+        ocrPasses.push(originalText);
       }
+
+      const bottomImage = await preprocessImageForOcr(fileToExtract, { x: 0, y: 0.62, width: 1, height: 0.34 });
+      const bottomResult = await activeWorker.recognize(bottomImage);
+      ocrPasses.push((bottomResult.data.text ?? "").trim());
+
+      await activeWorker.setParameters({
+        preserve_interword_spaces: "1",
+        tessedit_pageseg_mode: PSM.SPARSE_TEXT,
+        tessedit_char_whitelist: "0123456789.,:/-٫٬ ",
+      });
+      const numericResult = await activeWorker.recognize(bottomImage);
+      ocrPasses.push((numericResult.data.text ?? "").trim());
+
+      extractedText = joinOcrPasses(ocrPasses);
       if (!extractedText) {
         setError("OCR terminé, mais aucun texte exploitable n'a été détecté. Essayez une photo plus nette ou complétez les champs visibles.");
         return;
