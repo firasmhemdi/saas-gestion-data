@@ -237,3 +237,26 @@ class TestSprints3To5:
         assert fields["quantity"] == 46
         assert fields["unit"] == "m3"
         assert confidence >= 75
+
+    def test_sonede_noisy_number_cloud_uses_meter_difference(self):
+        text = """
+        الشركة الوطنية لاستغلال وتوزيع المياه
+        71.510 100 الاسم العنوان
+        42495 17
+        257580 550 46 17900
+        19800 3560 057
+        44990 315 46
+        7880
+        33640
+        مجموع معلوم الماء 3500
+        57.100
+        """
+
+        fields, confidence = extract_document_fields(text, "facture-sonede.jpg")
+
+        assert fields["provider"] == "SONEDE"
+        assert fields["amount_due"] == 57.1
+        assert fields["quantity"] == 46
+        assert fields["unit"] == "m3"
+        assert fields["document_date"]
+        assert confidence >= 65
