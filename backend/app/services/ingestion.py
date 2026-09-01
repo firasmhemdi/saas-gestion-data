@@ -107,6 +107,16 @@ def extract_document_fields(text: str, filename: str = "") -> tuple[dict[str, An
     fields: dict[str, Any] = {}
     is_steg_bill = any(keyword in searchable for keyword in ("steg", "societe tunisienne", "electricite et du gaz", "montant a payer", "facture sur releve"))
     is_water_bill = _is_water_bill(searchable)
+    is_telecom_bill = _is_telecom_bill(searchable)
+
+    if is_water_bill:
+        fields["invoice_kind"] = "water"
+    elif is_steg_bill:
+        fields["invoice_kind"] = "energy"
+    elif is_telecom_bill:
+        fields["invoice_kind"] = "telecom"
+    elif "facture" in searchable or "invoice" in searchable:
+        fields["invoice_kind"] = "generic"
 
     dates = re.findall(r"(\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{1,2}[-/.]\d{1,2}[-/.]\d{4})", normalized)
     if dates:
@@ -114,7 +124,7 @@ def extract_document_fields(text: str, filename: str = "") -> tuple[dict[str, An
         if parsed:
             fields["document_date"] = parsed.isoformat()
     parsed_dates = [parsed for raw in dates if (parsed := _parse_date(raw))]
-    period = _extract_period(parsed_dates, prefer_earliest=is_steg_bill)
+    period = _extract_labeled_period(normalized) or _extract_period(parsed_dates, prefer_earliest=is_steg_bill)
     if period:
         fields["period_start"] = period[0].isoformat()
         fields["period_end"] = period[1].isoformat()
@@ -255,6 +265,14 @@ def _extract_provider(text: str, searchable: str) -> str | None:
         return "STEG"
     if "sonede" in searchable or "eaux" in searchable:
         return "SONEDE"
+    if "topnet" in searchable:
+        return "Topnet"
+    if "ooredoo" in searchable:
+        return "Ooredoo"
+    if "tunisie telecom" in searchable or "tt telecom" in searchable:
+        return "Tunisie Telecom"
+    if "orange" in searchable and any(keyword in searchable for keyword in ("facture", "mobile", "internet", "telephone")):
+        return "Orange Tunisie"
     supplier_match = re.search(r"(?:fournisseur|supplier|prestataire)\s*[:=]\s*([A-Za-z0-9 &.'-]{2,80})", text, re.IGNORECASE)
     return supplier_match.group(1).strip() if supplier_match else None
 
@@ -263,6 +281,25 @@ def _is_water_bill(searchable: str) -> bool:
     if any(keyword in searchable for keyword in ("sonede", "consommation eau", "consommation d eau", "facture eau", "الماء", "المياه", "الماء الصالح", "استغلال وتوزيع المياه")):
         return True
     return bool(re.search(r"\b(eau|eaux|water)\b", searchable))
+
+
+def _is_telecom_bill(searchable: str) -> bool:
+    return any(
+        keyword in searchable
+        for keyword in (
+            "topnet",
+            "ooredoo",
+            "orange tunisie",
+            "tunisie telecom",
+            "telecom",
+            "internet",
+            "adsl",
+            "fibre",
+            "forfait",
+            "telephone",
+            "mobile",
+        )
+    )
 
 
 def _extract_total_amount(text: str) -> float | None:
@@ -324,6 +361,10 @@ def _amount_candidates(text: str, min_value: float = 0) -> list[float]:
         parsed = _parse_float(raw)
         if parsed is not None and min_value <= parsed <= 100000:
             amounts.append(parsed)
+    for match in re.finditer(r"(?<![0-9,.])([0-9]{1,3})[ \t]+([0-9]{3})(?![0-9,.])", text):
+        parsed = _parse_float(f"{match.group(1)}.{match.group(2)}")
+        if parsed is not None and min_value <= parsed <= 100000 and parsed not in amounts:
+            amounts.append(parsed)
     return amounts
 
 
@@ -338,6 +379,23 @@ def _extract_period(parsed_dates: list[date], prefer_earliest: bool = False) -> 
         second_period = next((candidate for candidate in parsed_dates[index + 1 :] if first_period < candidate), None)
         if second_period:
             return first_period, second_period
+    return None
+
+
+def _extract_labeled_period(text: str) -> tuple[date, date] | None:
+    date_pattern = r"(\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{1,2}[-/.]\d{1,2}[-/.]\d{4})"
+    patterns = (
+        rf"(?:periode|période|du|from)\D{{0,40}}{date_pattern}\D{{0,40}}(?:au|to|jusqu)\D{{0,40}}{date_pattern}",
+        rf"{date_pattern}\D{{0,25}}(?:au|to|jusqu)\D{{0,25}}{date_pattern}",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if not match:
+            continue
+        parsed_dates = [_parse_date(group) for group in match.groups()]
+        clean_dates = [value for value in parsed_dates if value is not None]
+        if len(clean_dates) >= 2 and clean_dates[0] < clean_dates[1]:
+            return clean_dates[0], clean_dates[1]
     return None
 
 
@@ -402,14 +460,14 @@ def _best_steg_quantity_near_line(text: str) -> float | None:
 
 
 def _extract_water_invoice_fields(line_text: str, normalized: str) -> dict[str, Any]:
-    fields: dict[str, Any] = {"provider": "SONEDE"}
+    fields: dict[str, Any] = {"provider": "SONEDE", "invoice_kind": "water"}
 
     quantity = _extract_water_quantity(line_text, normalized)
     if quantity is not None:
         fields["quantity"] = quantity
         fields["unit"] = "m3"
 
-    due = _extract_amount_due_from_lines(line_text)
+    due = _extract_water_amount_due(line_text, normalized)
     if due is None:
         due = _last_amount_in_text(normalized, min_value=1)
     if due is not None:
@@ -427,6 +485,12 @@ def _extract_generic_invoice_fields(line_text: str, normalized: str, searchable:
     provider = _extract_provider(normalized, searchable)
     if provider:
         fields["provider"] = provider
+
+    if _is_telecom_bill(searchable):
+        fields["invoice_kind"] = "telecom"
+        fields["service"] = _extract_telecom_service(searchable)
+    elif "invoice_kind" not in fields and ("facture" in searchable or "invoice" in searchable):
+        fields["invoice_kind"] = "generic"
 
     due = _extract_amount_due_from_lines(line_text)
     if due is not None:
@@ -450,7 +514,9 @@ def _extract_generic_invoice_fields(line_text: str, normalized: str, searchable:
 
 def _extract_water_quantity(line_text: str, normalized: str) -> float | None:
     explicit = _extract_explicit_quantity_with_unit(normalized, units=("m3", "m³", "م3", "م³"))
-    if explicit is not None:
+    index_values = _extract_consumption_from_indexes(line_text, max_difference=2000)
+    cloud_quantity = _best_water_quantity_from_number_cloud(normalized)
+    if explicit is not None and (explicit[0] >= 5 or not index_values and cloud_quantity is None):
         return explicit[0]
 
     labeled = re.search(r"(?:consommation|quantit[eé]|volume|استهلاك)\D{0,45}([0-9]+(?:[,.][0-9]+)?)", normalized, re.IGNORECASE)
@@ -474,11 +540,10 @@ def _extract_water_quantity(line_text: str, normalized: str) -> float | None:
         if integers:
             return integers[0]
 
-    index_values = _extract_consumption_from_indexes(line_text, max_difference=2000)
     if index_values:
         return index_values[0]
 
-    return _best_water_quantity_from_number_cloud(normalized)
+    return cloud_quantity
 
 
 def _extract_explicit_quantity_with_unit(text: str, units: tuple[str, ...] = ("kwh", "khw", "kw h", "m3", "m³", "م3", "م³", "t", "tonne", "tonnes", "l", "litre", "litres")) -> tuple[float, str] | None:
@@ -530,13 +595,47 @@ def _extract_amount_due_from_lines(line_text: str) -> float | None:
     return None
 
 
+def _extract_water_amount_due(line_text: str, normalized: str) -> float | None:
+    lines = [line for line in line_text.splitlines() if line.strip()]
+    payment_keywords = (
+        "montant a payer",
+        "montant à payer",
+        "a payer",
+        "à payer",
+        "total",
+        "ttc",
+        "المبلغ",
+        "المعلوم",
+        "الدفع",
+        "للدفع",
+        "للاستخلاص",
+        "الاستخلاص",
+        "المجموع",
+    )
+    for index, line in enumerate(lines):
+        searchable = _normalize_for_search(line)
+        if not any(keyword in searchable for keyword in payment_keywords):
+            continue
+        nearby = " ".join(lines[max(0, index - 1) : index + 2])
+        amounts = _amount_candidates(nearby, min_value=1)
+        clean_amounts = [amount for amount in amounts if 1 <= amount <= 2000]
+        if clean_amounts:
+            return clean_amounts[-1]
+
+    amounts = [amount for amount in _amount_candidates(normalized, min_value=1) if 1 <= amount <= 2000]
+    if not amounts:
+        return None
+    preferred = [amount for amount in amounts if amount >= 5 and not float(amount).is_integer()]
+    return preferred[-1] if preferred else amounts[-1]
+
+
 def _small_integer_candidates(text: str) -> list[float]:
     values: list[float] = []
     for match in re.finditer(r"(?<![0-9,.])([0-9]{1,4})(?![0-9,.])", text):
         parsed = _parse_float(match.group(1))
         if parsed is None:
             continue
-        if 1 <= parsed <= 300 and parsed not in {4, 5, 7, 12, 16, 17, 18, 19, 20, 100} and parsed not in values:
+        if 5 <= parsed <= 300 and parsed not in {5, 7, 12, 16, 17, 18, 19, 20, 100} and parsed not in values:
             values.append(parsed)
     return values
 
@@ -547,11 +646,28 @@ def _best_water_quantity_from_number_cloud(text: str) -> float | None:
     common_quantities = [
         value
         for value in clean_numbers
-        if float(value).is_integer() and 2 <= value <= 300 and value not in {12, 16, 17, 18, 19, 20, 100}
+        if float(value).is_integer() and 5 <= value <= 300 and value not in {5, 7, 12, 16, 17, 18, 19, 20, 100}
     ]
+    repeated = [value for value in common_quantities if common_quantities.count(value) > 1]
+    if repeated:
+        return repeated[0]
     if common_quantities:
         return common_quantities[0]
     return None
+
+
+def _extract_telecom_service(searchable: str) -> str:
+    if "fibre" in searchable:
+        return "Internet fibre"
+    if "adsl" in searchable:
+        return "Internet ADSL"
+    if "internet" in searchable:
+        return "Internet"
+    if "mobile" in searchable or "forfait" in searchable:
+        return "Forfait mobile"
+    if "telephone" in searchable or "telecom" in searchable:
+        return "Téléphonie"
+    return "Service télécom"
 
 
 def _extract_consumption_from_indexes(text: str, max_difference: int = 50000) -> list[float]:

@@ -16,6 +16,7 @@ const documentTypeLabels: Record<string, string> = {
 };
 
 const fieldLabels: Record<string, string> = {
+  service: "Service",
   provider: "Fournisseur",
   document_date: "Date document",
   period_start: "Début période",
@@ -28,8 +29,45 @@ const fieldLabels: Record<string, string> = {
   gas_unit: "Unité gaz",
 };
 
-const editableFields = ["provider", "document_date", "period_start", "period_end", "amount", "amount_due", "quantity", "unit", "gas_quantity", "gas_unit"];
-const requiredFields = ["document_date", "quantity", "unit"];
+const allEditableFields = ["service", "provider", "document_date", "period_start", "period_end", "amount", "amount_due", "quantity", "unit", "gas_quantity", "gas_unit"];
+
+type InvoiceKind = "energy" | "water" | "telecom" | "generic";
+
+function asStringMap(value: Record<string, unknown>) {
+  return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, String(item ?? "")]));
+}
+
+function getInvoiceKind(fields: Record<string, string>): InvoiceKind {
+  const kind = fields.invoice_kind?.toLowerCase();
+  const provider = fields.provider?.toLowerCase() ?? "";
+  const unit = normalizeUnit(fields.unit ?? "");
+  if (kind === "water" || provider.includes("sonede") || (unit === "m3" && !fields.gas_quantity)) return "water";
+  if (kind === "telecom" || ["topnet", "ooredoo", "orange", "telecom"].some((name) => provider.includes(name))) return "telecom";
+  if (kind === "generic") return "generic";
+  return "energy";
+}
+
+function getVisibleFields(kind: InvoiceKind) {
+  if (kind === "water") return ["provider", "document_date", "period_start", "period_end", "amount", "amount_due", "quantity", "unit"];
+  if (kind === "telecom") return ["provider", "service", "document_date", "period_start", "period_end", "amount", "amount_due"];
+  if (kind === "generic") return ["provider", "document_date", "period_start", "period_end", "amount", "amount_due", "quantity", "unit"];
+  return ["provider", "document_date", "period_start", "period_end", "amount", "amount_due", "quantity", "unit", "gas_quantity", "gas_unit"];
+}
+
+function getRequiredFields(kind: InvoiceKind) {
+  if (kind === "telecom" || kind === "generic") return ["document_date", "amount_due"];
+  return ["document_date", "quantity", "unit"];
+}
+
+function getDocumentLabel(document: DocumentRecord) {
+  const documentFields = asStringMap(document.extracted_data?.fields ?? {});
+  return documentFields.invoice_kind ? {
+    energy: "Facture énergie",
+    water: "Facture eau",
+    telecom: "Facture télécom",
+    generic: "Facture générale",
+  }[getInvoiceKind(documentFields)] : documentTypeLabels[document.document_type];
+}
 
 function normalizeUnit(value: string) {
   return value.trim().toLowerCase().replace("³", "3");
@@ -80,6 +118,10 @@ function formatAmount(value: string | undefined) {
   return value ? `${value} TND` : "--";
 }
 
+function formatMeasure(value: string | undefined, unit: string | undefined) {
+  return value ? `${value} ${unit || ""}`.trim() : "--";
+}
+
 export default function DocumentsPage() {
   const [documents, setDocuments] = useState<DocumentRecord[]>([]);
   const [sites, setSites] = useState<Site[]>([]);
@@ -105,7 +147,10 @@ export default function DocumentsPage() {
     setRawText(document.raw_text);
     setSiteId(document.site_id ? String(document.site_id) : "");
     const current = document.extracted_data?.fields ?? {};
-    setFields(Object.fromEntries(editableFields.map((key) => [key, String(current[key] ?? "")])));
+    setFields({
+      ...Object.fromEntries(allEditableFields.map((key) => [key, String(current[key] ?? "")])),
+      ...asStringMap(current),
+    });
   }, []);
 
   const load = useCallback(async (preferredDocumentId?: number) => {
@@ -141,24 +186,45 @@ export default function DocumentsPage() {
     if (match) setIndicatorId(String(match.id));
   }, [fields.unit, indicatorId, indicators]);
 
-  const extractedCount = editableFields.filter((key) => fields[key]).length;
+  const invoiceKind = getInvoiceKind(fields);
+  const visibleFields = getVisibleFields(invoiceKind);
+  const requiredFields = getRequiredFields(invoiceKind);
+  const extractedCount = visibleFields.filter((key) => fields[key]).length;
   const missingRequired = requiredFields.filter((key) => !fields[key]);
   const validationReady = missingRequired.length === 0;
   const selectedIndicator = indicators.find((indicator) => String(indicator.id) === indicatorId);
   const currentSite = sites.find((site) => String(site.id) === siteId);
-  const primaryUnit = normalizeUnit(fields.unit ?? "");
-  const isWaterDocument = fields.provider?.toLowerCase().includes("sonede") || (primaryUnit === "m3" && !fields.gas_quantity);
-  const summaryCards = isWaterDocument
-    ? [
-        ["Eau", fields.quantity ? `${fields.quantity} ${fields.unit || "m3"}`.trim() : "--"],
-        ["Fournisseur", fields.provider || "--"],
-        ["À payer", formatAmount(fields.amount_due || fields.amount)],
-      ]
-    : [
-        ["Électricité", fields.quantity ? `${fields.quantity} ${fields.unit || ""}`.trim() : "--"],
-        ["Gaz", fields.gas_quantity ? `${fields.gas_quantity} ${fields.gas_unit || ""}`.trim() : "--"],
-        ["À payer", formatAmount(fields.amount_due || fields.amount)],
-      ];
+  const canCreateEnvironmentalEntry = Boolean(fields.document_date && fields.quantity && fields.unit);
+  const documentKindLabels: Record<InvoiceKind, string> = {
+    energy: "Facture énergie",
+    water: "Facture eau",
+    telecom: "Facture télécom",
+    generic: "Facture générale",
+  };
+  const summaryCards =
+    invoiceKind === "water"
+      ? [
+          ["Eau", formatMeasure(fields.quantity, fields.unit || "m3")],
+          ["Fournisseur", fields.provider || "--"],
+          ["À payer", formatAmount(fields.amount_due || fields.amount)],
+        ]
+      : invoiceKind === "telecom"
+        ? [
+            ["Service", fields.service || "Télécom"],
+            ["Fournisseur", fields.provider || "--"],
+            ["À payer", formatAmount(fields.amount_due || fields.amount)],
+          ]
+        : invoiceKind === "generic"
+          ? [
+              ["Fournisseur", fields.provider || "--"],
+              ["Date", fields.document_date || "--"],
+              ["À payer", formatAmount(fields.amount_due || fields.amount)],
+            ]
+          : [
+              ["Électricité", formatMeasure(fields.quantity, fields.unit)],
+              ["Gaz", formatMeasure(fields.gas_quantity, fields.gas_unit)],
+              ["À payer", formatAmount(fields.amount_due || fields.amount)],
+            ];
 
   function resetDocumentForm() {
     if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
@@ -294,7 +360,7 @@ export default function DocumentsPage() {
         fields: cleanedFields,
         indicator_id: indicatorId ? Number(indicatorId) : null,
         site_id: siteId ? Number(siteId) : selected.site_id,
-        create_environmental_entry: true,
+        create_environmental_entry: canCreateEnvironmentalEntry,
       });
       selectDocument(document);
       setMessage("Extraction validée et intégrée si les champs sont complets.");
@@ -337,7 +403,7 @@ export default function DocumentsPage() {
             <div className="grid grid-cols-3 gap-2 text-center">
               {[
                 ["Documents", documents.length],
-                ["Champs", `${extractedCount}/10`],
+                ["Champs", `${extractedCount}/${visibleFields.length}`],
                 ["Confiance", selected?.extracted_data?.confidence ? `${selected.extracted_data.confidence}%` : "--"],
               ].map(([label, value]) => (
                 <div key={label} className="min-w-24 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
@@ -450,7 +516,7 @@ export default function DocumentsPage() {
                 <h2 className="font-semibold text-slate-950">Contrôle et validation</h2>
                 <p className="mt-1 text-sm text-slate-500">Les champs reconnus sont prêts à être corrigés puis intégrés.</p>
               </div>
-              {selected ? <span className="rounded-full bg-sky-50 px-2.5 py-1 text-xs font-semibold text-sky-700">{documentTypeLabels[selected.document_type]}</span> : null}
+              {selected ? <span className="rounded-full bg-sky-50 px-2.5 py-1 text-xs font-semibold text-sky-700">{documentKindLabels[invoiceKind]}</span> : null}
             </div>
             {selected ? (
               <>
@@ -483,7 +549,7 @@ export default function DocumentsPage() {
                 </div>
 
                 <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                  {editableFields.map((key) => (
+                  {visibleFields.map((key) => (
                     <label key={key} className="text-sm font-medium text-slate-700">
                       {fieldLabels[key] ?? key}
                       <input
@@ -510,7 +576,7 @@ export default function DocumentsPage() {
                 </div>
                 <div className="mt-5 flex flex-wrap gap-2">
                   <button type="button" onClick={validateDocument} disabled={busy || !validationReady} className="rounded-lg bg-emerald-600 px-5 py-3 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:opacity-60">
-                    Valider et intégrer
+                    {canCreateEnvironmentalEntry ? "Valider et intégrer" : "Valider le document"}
                   </button>
                   <button type="button" onClick={reanalyzeDocument} disabled={busy} className="rounded-lg border border-slate-300 bg-white px-5 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60">
                     Réanalyser
@@ -539,7 +605,7 @@ export default function DocumentsPage() {
               <button key={document.id} type="button" onClick={() => selectDocument(document)} className="flex w-full items-center justify-between gap-4 px-4 py-3 text-left hover:bg-slate-50">
                 <div>
                   <p className="font-medium text-slate-900">{document.filename}</p>
-                  <p className="text-xs text-slate-500">{documentTypeLabels[document.document_type]} · {document.status}</p>
+                  <p className="text-xs text-slate-500">{getDocumentLabel(document)} · {document.status}</p>
                 </div>
                 <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">{document.extracted_data?.confidence ?? 0}%</span>
               </button>

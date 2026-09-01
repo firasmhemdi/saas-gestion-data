@@ -260,3 +260,46 @@ class TestSprints3To5:
         assert fields["unit"] == "m3"
         assert fields["document_date"]
         assert confidence >= 65
+
+    def test_sonede_ignores_tiny_noise_and_reads_spaced_amount(self):
+        text = """
+        الشركة الوطنية لاستغلال وتوزيع المياه
+        SONEDE
+        رقم الفاتورة 2
+        42495 17
+        257580 550 46 17900
+        44990 315 46
+        المبلغ المطلوب للدفع
+        57 100
+        """
+
+        fields, confidence = extract_document_fields(text, "facture-sonede.jpg")
+
+        assert fields["invoice_kind"] == "water"
+        assert fields["provider"] == "SONEDE"
+        assert fields["amount_due"] == 57.1
+        assert fields["quantity"] == 46
+        assert fields["unit"] == "m3"
+        assert confidence >= 65
+
+    def test_telecom_invoice_extracts_provider_service_and_amount_without_energy_fields(self):
+        text = """
+        Ooredoo Tunisie
+        Facture internet fibre
+        Date facture 2026-08-20
+        Periode du 2026-08-01 au 2026-08-31
+        Total TTC 59.900
+        Net a payer 59.900
+        """
+
+        fields, confidence = extract_document_fields(text, "facture-ooredoo.pdf")
+
+        assert fields["invoice_kind"] == "telecom"
+        assert fields["provider"] == "Ooredoo"
+        assert fields["service"] == "Internet fibre"
+        assert fields["document_date"] == "2026-08-20"
+        assert fields["period_start"] == "2026-08-01"
+        assert fields["period_end"] == "2026-08-31"
+        assert fields["amount_due"] == 59.9
+        assert "gas_quantity" not in fields
+        assert confidence >= 75
