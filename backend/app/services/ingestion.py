@@ -88,10 +88,10 @@ def commit_rows(rows: list[dict[str, Any]], mapping: dict[str, str]) -> list[dic
 
 
 def classify_document(text: str, filename: str = "") -> DocumentType:
-    haystack = f"{filename}\n{text}".lower()
-    if any(k in haystack for k in ("facture", "electricite", "électricité", "gaz", "kwh")):
+    haystack = _normalize_for_search(f"{filename}\n{text}")
+    if any(k in haystack for k in ("facture", "electricite", "gaz", "kwh", "khw", "kw h", "steg", "sonede", "releve")):
         return DocumentType.facture_energie
-    if any(k in haystack for k in ("bordereau", "dechet", "déchet", "benne", "tonne")):
+    if any(k in haystack for k in ("bordereau", "dechet", "benne", "tonne")):
         return DocumentType.bordereau_dechets
     if "contrat" in haystack:
         return DocumentType.contrat
@@ -101,12 +101,13 @@ def classify_document(text: str, filename: str = "") -> DocumentType:
 
 
 def extract_document_fields(text: str) -> tuple[dict[str, Any], int]:
-    normalized = " ".join(text.split())
+    line_text = _normalize_ocr_text(text)
+    normalized = " ".join(line_text.split())
     searchable = _normalize_for_search(normalized)
     fields: dict[str, Any] = {}
-    is_steg_bill = any(keyword in searchable for keyword in ("steg", "societe tunisienne", "electricite et du gaz", "montant a payer"))
+    is_steg_bill = any(keyword in searchable for keyword in ("steg", "societe tunisienne", "electricite et du gaz", "montant a payer", "facture sur releve"))
 
-    dates = re.findall(r"(\d{4}-\d{2}-\d{2}|\d{2}[/-]\d{2}[/-]\d{4})", normalized)
+    dates = re.findall(r"(\d{4}[-/.]\d{2}[-/.]\d{2}|\d{2}[-/.]\d{2}[-/.]\d{4})", normalized)
     if dates:
         parsed = _parse_date(dates[0])
         if parsed:
@@ -120,6 +121,10 @@ def extract_document_fields(text: str) -> tuple[dict[str, Any], int]:
     if is_steg_bill:
         fields["provider"] = "STEG"
 
+    provider = _extract_provider(normalized, searchable)
+    if provider:
+        fields["provider"] = provider
+
     amount_due = _extract_amount_due(normalized)
     if amount_due is not None:
         fields["amount_due"] = amount_due
@@ -128,7 +133,7 @@ def extract_document_fields(text: str) -> tuple[dict[str, Any], int]:
     if amount is not None:
         fields["amount"] = amount
 
-    if is_steg_bill and "index" in searchable:
+    if is_steg_bill:
         consumption_values = _extract_consumption_from_indexes(normalized)
         if consumption_values:
             fields["quantity"] = consumption_values[0]
@@ -146,10 +151,10 @@ def extract_document_fields(text: str) -> tuple[dict[str, Any], int]:
             fields["gas_quantity"] = priced_consumptions["gas"]
             fields["gas_unit"] = "m3"
 
-    quantity_match = re.search(r"([0-9]+(?:[,.][0-9]+)?)\s*(kwh|m3|m³|t|tonnes?|litres?|l)\b", normalized, re.IGNORECASE)
+    quantity_match = re.search(r"([0-9]+(?:[,.][0-9]+)?)\s*(k\s*w\s*h|kw\s?h|kwh|khw|m3|m³|t|tonnes?|litres?|l)\b", normalized, re.IGNORECASE)
     if quantity_match and "quantity" not in fields:
         fields["quantity"] = _parse_float(quantity_match.group(1))
-        fields["unit"] = quantity_match.group(2)
+        fields["unit"] = _normalize_unit(quantity_match.group(2))
     elif "quantity" not in fields and any(keyword in searchable for keyword in ("electricite", "eclairage", "kwh")):
         electricity_quantity = _extract_after_keywords(normalized, ("electricite", "électricité", "eclairage", "éclairage"), window=140)
         if electricity_quantity is not None and electricity_quantity >= 20:
@@ -167,8 +172,13 @@ def extract_document_fields(text: str) -> tuple[dict[str, Any], int]:
             fields["gas_unit"] = "m3"
 
     supplier_match = re.search(r"(?:fournisseur|supplier)\s*[:=]\s*([A-Za-z0-9 &.'-]{2,80})", normalized, re.IGNORECASE)
-    if supplier_match:
+    if supplier_match and "provider" not in fields:
         fields["provider"] = supplier_match.group(1).strip()
+
+    if is_steg_bill:
+        line_fields = _extract_steg_values_from_lines(line_text)
+        for key, value in line_fields.items():
+            fields.setdefault(key, value)
 
     confidence = _estimate_extraction_confidence(fields, is_steg_bill)
     return fields, confidence
@@ -189,15 +199,43 @@ def _clean_cell(value: Any) -> Any:
 def _parse_float(value: Any) -> float | None:
     if value is None:
         return None
+    raw = str(value).strip().replace("\u00a0", " ").replace(" ", "")
+    raw = raw.replace("O", "0").replace("o", "0")
     try:
-        return float(str(value).strip().replace(",", "."))
+        return float(raw.replace(",", "."))
     except ValueError:
         return None
 
 
+def _normalize_ocr_text(value: str) -> str:
+    cleaned = value.replace("\u00a0", " ")
+    cleaned = cleaned.replace("—", "-").replace("–", "-")
+    cleaned = re.sub(r"[|¦]", " ", cleaned)
+    cleaned = re.sub(r"[ \t]+", " ", cleaned)
+    return "\n".join(line.strip() for line in cleaned.splitlines() if line.strip())
+
+
 def _normalize_for_search(value: str) -> str:
-    replacements = str.maketrans({"é": "e", "è": "e", "ê": "e", "à": "a", "â": "a", "ù": "u", "ç": "c", "ï": "i", "î": "i"})
+    replacements = str.maketrans({"é": "e", "è": "e", "ê": "e", "à": "a", "â": "a", "ù": "u", "ç": "c", "ï": "i", "î": "i", "'": " "})
     return value.lower().translate(replacements)
+
+
+def _normalize_unit(value: str) -> str:
+    normalized = _normalize_for_search(value).replace(" ", "").replace("³", "3")
+    if normalized in {"kwh", "khw"} or normalized.startswith("kw"):
+        return "kWh"
+    if normalized in {"m3", "m"}:
+        return "m3"
+    return value.strip()
+
+
+def _extract_provider(text: str, searchable: str) -> str | None:
+    if any(keyword in searchable for keyword in ("steg", "societe tunisienne", "electricite et du gaz")):
+        return "STEG"
+    if "sonede" in searchable or "eaux" in searchable:
+        return "SONEDE"
+    supplier_match = re.search(r"(?:fournisseur|supplier|prestataire)\s*[:=]\s*([A-Za-z0-9 &.'-]{2,80})", text, re.IGNORECASE)
+    return supplier_match.group(1).strip() if supplier_match else None
 
 
 def _extract_total_amount(text: str) -> float | None:
@@ -276,9 +314,71 @@ def _extract_period(parsed_dates: list[date], prefer_earliest: bool = False) -> 
     return None
 
 
+def _extract_steg_values_from_lines(text: str) -> dict[str, Any]:
+    lines = [line for line in text.splitlines() if line.strip()]
+    fields: dict[str, Any] = {}
+
+    for index, line in enumerate(lines):
+        searchable = _normalize_for_search(line)
+        nearby = " ".join(lines[index : index + 3])
+        nearby_searchable = _normalize_for_search(nearby)
+
+        if "montant total" in nearby_searchable and "amount" not in fields:
+            amount = _last_amount_in_text(nearby, min_value=10)
+            if amount is not None:
+                fields["amount"] = amount
+
+        if "montant a payer" in nearby_searchable and "amount_due" not in fields:
+            due = _last_amount_in_text(nearby, min_value=50)
+            if due is not None:
+                fields["amount_due"] = due
+
+        if "total" not in searchable and any(keyword in searchable for keyword in ("electricite", "eclairage")) and "quantity" not in fields:
+            quantity = _best_steg_quantity_near_line(nearby)
+            if quantity is not None:
+                fields["quantity"] = quantity
+                fields["unit"] = "kWh"
+
+        if "total" not in searchable and "gaz" in searchable and "gas_quantity" not in fields:
+            quantity = _best_steg_quantity_near_line(nearby)
+            if quantity is not None:
+                fields["gas_quantity"] = quantity
+                fields["gas_unit"] = "m3"
+
+    if "quantity" not in fields or "gas_quantity" not in fields:
+        index_values = _extract_consumption_from_indexes(text)
+        if index_values:
+            fields.setdefault("quantity", index_values[0])
+            fields.setdefault("unit", "kWh")
+        if len(index_values) > 1:
+            fields.setdefault("gas_quantity", index_values[1])
+            fields.setdefault("gas_unit", "m3")
+
+    return fields
+
+
+def _best_steg_quantity_near_line(text: str) -> float | None:
+    quantity_label = re.search(r"(?:quantit[eé]|consommation)\D{0,20}([0-9]+(?:[,.][0-9]+)?)", text, re.IGNORECASE)
+    if quantity_label:
+        parsed = _parse_float(quantity_label.group(1))
+        if parsed is not None and 1 <= parsed <= 50000:
+            return parsed
+
+    index_values = _extract_consumption_from_indexes(text)
+    if index_values:
+        return index_values[0]
+
+    numbers = [_parse_float(match.group(1)) for match in re.finditer(r"\b([0-9]+(?:[,.][0-9]+)?)\b", text)]
+    clean_numbers = [value for value in numbers if value is not None and 1 <= value <= 50000]
+    integer_candidates = [value for value in clean_numbers if float(value).is_integer() and value not in {4, 5, 7, 19}]
+    return integer_candidates[0] if integer_candidates else None
+
+
 def _extract_consumption_from_indexes(text: str) -> list[float]:
     values: list[float] = []
-    integer_tokens = [int(match.group(1)) for match in re.finditer(r"\b([0-9]{4,6})\b", text)]
+    without_dates = re.sub(r"\b\d{4}[-/.]\d{2}[-/.]\d{2}\b", " ", text)
+    without_dates = re.sub(r"\b\d{2}[-/.]\d{2}[-/.]\d{4}\b", " ", without_dates)
+    integer_tokens = [int(match.group(1)) for match in re.finditer(r"\b([0-9]{4,6})\b", without_dates)]
     for previous, current in zip(integer_tokens, integer_tokens[1:], strict=False):
         difference = previous - current
         if 5 <= difference <= 50000 and difference not in values:
@@ -371,8 +471,8 @@ def _estimate_extraction_confidence(fields: dict[str, Any], is_steg_bill: bool) 
 def _parse_date(value: Any) -> date | None:
     if value is None:
         return None
-    raw = str(value).strip()
-    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y"):
+    raw = str(value).strip().replace(".", "-").replace("/", "-")
+    for fmt in ("%Y-%m-%d", "%d-%m-%Y"):
         try:
             return datetime.strptime(raw, fmt).date()
         except ValueError:

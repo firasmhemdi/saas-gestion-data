@@ -188,3 +188,31 @@ class TestSprints3To5:
         assert fields["amount"] == 85.352
         assert fields["amount_due"] == 987
         assert confidence >= 85
+
+    def test_noisy_steg_photo_extracts_key_fields_from_lines(self):
+        text = """
+        Societe Tunisienne de l Electricite et du Gaz
+        F a c t u r e   s u r   r e l e v e
+        du 2025.12.01 au 2026.03.30
+        CONSOMMATION & SERVICES
+        Electricite 704493 ECLAIRAGE 37.312 0.176 212 72866 72654 4 7
+        Total Electricite 56.912
+        Gaz 87021 GAZ-NATUR 12.012 0.231 52 3922 3870 4 5
+        Total Gaz 15.012
+        Total Consommation & Services 71.924
+        MONTANT TOTAL 85.352
+        987.000 Montant a payer
+        """
+
+        fields, confidence = extract_document_fields(text)
+
+        assert fields["provider"] == "STEG"
+        assert fields["period_start"] == "2025-12-01"
+        assert fields["period_end"] == "2026-03-30"
+        assert fields["amount"] == 85.352
+        assert fields["amount_due"] == 987
+        assert fields["quantity"] == 212
+        assert fields["unit"] == "kWh"
+        assert fields["gas_quantity"] == 52
+        assert fields["gas_unit"] == "m3"
+        assert confidence >= 85

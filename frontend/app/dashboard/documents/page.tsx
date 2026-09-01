@@ -35,6 +35,47 @@ function normalizeUnit(value: string) {
   return value.trim().toLowerCase().replace("³", "3");
 }
 
+async function preprocessImageForOcr(file: File): Promise<Blob | File> {
+  try {
+    const bitmap = await createImageBitmap(file);
+    const maxSide = 2200;
+    const scale = Math.min(3, Math.max(1, maxSide / Math.max(bitmap.width, bitmap.height)));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(bitmap.width * scale);
+    canvas.height = Math.round(bitmap.height * scale);
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    if (!context) return file;
+
+    context.imageSmoothingEnabled = true;
+    context.imageSmoothingQuality = "high";
+    context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+
+    const image = context.getImageData(0, 0, canvas.width, canvas.height);
+    const data = image.data;
+    for (let index = 0; index < data.length; index += 4) {
+      const gray = data[index] * 0.299 + data[index + 1] * 0.587 + data[index + 2] * 0.114;
+      const contrasted = Math.max(0, Math.min(255, (gray - 128) * 1.45 + 128));
+      const cleaned = contrasted > 218 ? 255 : contrasted < 58 ? 0 : contrasted;
+      data[index] = cleaned;
+      data[index + 1] = cleaned;
+      data[index + 2] = cleaned;
+    }
+    context.putImageData(image, 0, 0);
+
+    return await new Promise((resolve) => {
+      canvas.toBlob((blob) => resolve(blob ?? file), "image/png", 1);
+    });
+  } catch {
+    return file;
+  }
+}
+
+function ocrTextScore(value: string) {
+  const meaningfulWords = (value.match(/[A-Za-zÀ-ÿ]{3,}/g) ?? []).length;
+  const numbers = (value.match(/\d+/g) ?? []).length;
+  return value.length + meaningfulWords * 12 + numbers * 8;
+}
+
 export default function DocumentsPage() {
   const [documents, setDocuments] = useState<DocumentRecord[]>([]);
   const [sites, setSites] = useState<Site[]>([]);
@@ -63,7 +104,7 @@ export default function DocumentsPage() {
     setFields(Object.fromEntries(editableFields.map((key) => [key, String(current[key] ?? "")])));
   }, []);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (preferredDocumentId?: number) => {
     setError(null);
     try {
       const [documentData, siteData, indicatorData] = await Promise.all([
@@ -74,7 +115,12 @@ export default function DocumentsPage() {
       setDocuments(documentData);
       setSites(siteData);
       setIndicators(indicatorData);
-      if (!selected && documentData[0]) selectDocument(documentData[0]);
+      const preferred = preferredDocumentId ? documentData.find((document) => document.id === preferredDocumentId) : null;
+      if (preferred) {
+        selectDocument(preferred);
+      } else if (!selected && documentData[0]) {
+        selectDocument(documentData[0]);
+      }
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Impossible de charger les documents.");
     }
@@ -154,8 +200,8 @@ export default function DocumentsPage() {
     setMessage("Extraction OCR en cours...");
     let worker: Awaited<ReturnType<(typeof import("tesseract.js"))["createWorker"]>> | null = null;
     try {
-      const { createWorker } = await import("tesseract.js");
-      const activeWorker = await createWorker("fra+eng", 1, {
+      const { createWorker, PSM } = await import("tesseract.js");
+      const activeWorker = await createWorker("fra+eng+ara", 1, {
         logger: (event: { status?: string; progress?: number }) => {
           if (event.status === "recognizing text" && typeof event.progress === "number") {
             setOcrProgress(Math.round(event.progress * 100));
@@ -163,8 +209,21 @@ export default function DocumentsPage() {
         },
       });
       worker = activeWorker;
-      const result = await activeWorker.recognize(fileToExtract);
-      const extractedText = (result.data.text ?? "").trim();
+      await activeWorker.setParameters({
+        preserve_interword_spaces: "1",
+        tessedit_pageseg_mode: PSM.SPARSE_TEXT,
+      });
+
+      const preparedImage = await preprocessImageForOcr(fileToExtract);
+      const preparedResult = await activeWorker.recognize(preparedImage);
+      let extractedText = (preparedResult.data.text ?? "").trim();
+      if (ocrTextScore(extractedText) < 250) {
+        const originalResult = await activeWorker.recognize(fileToExtract);
+        const originalText = (originalResult.data.text ?? "").trim();
+        if (ocrTextScore(originalText) > ocrTextScore(extractedText)) {
+          extractedText = originalText;
+        }
+      }
       if (!extractedText) {
         setError("OCR terminé, mais aucun texte exploitable n'a été détecté. Essayez une photo plus nette ou complétez les champs visibles.");
         return;
@@ -194,7 +253,7 @@ export default function DocumentsPage() {
       });
       selectDocument(document);
       setMessage("Document analysé. Vérifiez les champs puis validez l'intégration.");
-      await load();
+      await load(document.id);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Impossible d'analyser le document.");
     } finally {
@@ -222,7 +281,7 @@ export default function DocumentsPage() {
       });
       selectDocument(document);
       setMessage("Extraction validée et intégrée si les champs sont complets.");
-      await load();
+      await load(document.id);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Impossible de valider le document.");
     } finally {
@@ -239,7 +298,7 @@ export default function DocumentsPage() {
       const document = await api.post<DocumentRecord>(`/documents/${selected.id}/reanalyze`);
       selectDocument(document);
       setMessage("Document réanalysé avec les règles d'extraction les plus récentes.");
-      await load();
+      await load(document.id);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Impossible de réanalyser le document.");
     } finally {
